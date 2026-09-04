@@ -22,7 +22,7 @@ POLL_INTERVAL_SECONDS = int(os.environ.get("POLL_INTERVAL_SECONDS", "30"))
 # these names (any order — the bot looks columns up by header, not position).
 COLUMNS = [
     "Timestamp",
-    "Email",
+    "Email Address",
     "TelegramUsername",
     "ChatID",
     "Eligible",

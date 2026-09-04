@@ -51,7 +51,7 @@ class SheetStore:
     def find_by_email(self, email: str) -> dict | None:
         email = email.strip().lower()
         for row in self.all_rows():
-            if str(row.get("Email", "")).strip().lower() == email:
+            if str(row.get("Email Address", "")).strip().lower() == email:
                 return row
         return None
 

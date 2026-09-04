@@ -93,4 +93,4 @@ async def invite(update: Update, context: ContextTypes.DEFAULT_TYPE):
         chat_id=int(row["ChatID"]),
         text=messages.GROUP_INVITE.format(invite_link=invite_link),
     )
-    await update.message.reply_text(f"Sent the invite link to {row.get('Email')}.")
+    await update.message.reply_text(f"Sent the invite link to {row.get('Email Address')}.")

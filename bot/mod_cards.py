@@ -9,7 +9,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 def wallet_submitted_card(row: dict):
     text = (
         f"💰 *Wallet submitted*\n"
-        f"Email: {row.get('Email')}\n"
+        f"Email: {row.get('Email Address')}\n"
         f"Telegram: @{row.get('TelegramUsername') or '—'}\n"
         f"Wallet: `{row.get('WalletAddress')}`\n\n"
         f"Send the $5,000 testnet USDC, then tap below."
@@ -23,7 +23,7 @@ def wallet_submitted_card(row: dict):
 def claim_requested_card(row: dict):
     text = (
         f"🏆 *Claim submitted*\n"
-        f"Email: {row.get('Email')}\n"
+        f"Email: {row.get('Email Address')}\n"
         f"Telegram: @{row.get('TelegramUsername') or '—'}\n"
         f"Wallet: `{row.get('WalletAddress')}`\n\n"
         f"Go check their testnet account, then tap below."
