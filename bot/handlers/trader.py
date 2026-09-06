@@ -24,9 +24,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     store = get_store(context)
     row = store.find_by_chat_id(update.effective_chat.id)
     if row is not None:
-        await update.message.reply_text("You're already linked. Send /status to check where you're at.")
+        await update.message.reply_text(messages.ALREADY_LINKED)
         return
-    await update.message.reply_text(messages.WELCOME)
+    await update.message.reply_text(messages.WELCOME, parse_mode="Markdown")
+
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(messages.HELP)
 
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -124,4 +128,4 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Anything else that doesn't match a known state - point them at /status
     # rather than guessing what they meant.
-    await update.message.reply_text("Not sure what to do with that. Send /status to check where you're at.")
+    await update.message.reply_text(messages.UNKNOWN_MESSAGE)

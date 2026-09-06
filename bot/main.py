@@ -19,6 +19,7 @@ def main():
     app.bot_data["mod_group_chat_id"] = config.MOD_GROUP_CHAT_ID
 
     app.add_handler(CommandHandler("start", trader.start))
+    app.add_handler(CommandHandler("help", trader.help_command))
     app.add_handler(CommandHandler("status", trader.status))
     app.add_handler(CommandHandler("claim", trader.claim))
     app.add_handler(CommandHandler("invite", admin.invite))

@@ -2,13 +2,31 @@
 without touching handler logic. Keep it plain — see ELI5 note in README."""
 
 WELCOME = (
-    "Welcome to the Avantis Challenge bot!\n\n"
-    "Please reply with the email address you used on the application form."
+    "Welcome to the Avantis Challenge bot! 👋\n\n"
+    "This is how we'll reach you with updates about your application — approval, "
+    "your testnet funds, and your challenge results all come through this chat.\n\n"
+    "Step 1: reply here with the *exact email address* you used on the application form.\n\n"
+    "Send /help anytime if you get stuck."
 )
 
+ALREADY_LINKED = "You're already linked. Send /status to check where you're at, or /help for a list of commands."
+
 EMAIL_NOT_FOUND = (
-    "We couldn't find that email in our applicant list. "
-    "Double check it matches exactly what you put on the form, and try again."
+    "We couldn't find that email in our applicant list.\n\n"
+    "Double check it's typed exactly as you put it on the form (no extra spaces, "
+    "correct capitalization isn't required but spelling is) and send it again.\n\n"
+    "Still stuck after a couple tries? Message a mod directly for help — don't keep "
+    "guessing emails."
+)
+
+HELP = (
+    "Here's what I can do:\n\n"
+    "/start — link your Telegram to your application (do this first)\n"
+    "/status — check where you're at in the process\n"
+    "/claim — tell us you've completed the challenge (only works once you're funded)\n"
+    "/help — show this message\n\n"
+    "Once you're linked, you don't need to do anything else — we'll message you here "
+    "at each step. No need to keep checking in."
 )
 
 LINK_SUCCESS_NOT_YET_REVIEWED = (
@@ -64,7 +82,9 @@ GROUP_INVITE = (
     "Congrats again! Here's your invite to a private chat with the team:\n{invite_link}"
 )
 
-STATUS_UNLINKED = "You haven't linked your Telegram yet — send /start first."
+STATUS_UNLINKED = "You haven't linked your Telegram yet — send /start first, then reply with your application email."
+
+UNKNOWN_MESSAGE = "Not sure what to do with that. Send /status to check where you're at, or /help for commands."
 
 STATUS_TEMPLATE = (
     "Your status:\n"
