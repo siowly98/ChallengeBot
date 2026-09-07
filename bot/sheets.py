@@ -10,6 +10,9 @@ no need to go through a bot command for everything.
 """
 from __future__ import annotations
 
+import json
+import os
+
 import gspread
 from google.oauth2.service_account import Credentials
 
@@ -28,7 +31,17 @@ def _truthy(value) -> bool:
 
 class SheetStore:
     def __init__(self):
-        creds = Credentials.from_service_account_file(config.GOOGLE_CREDENTIALS_PATH, scopes=SCOPES)
+        # On a host like Railway there's no way to commit the credentials
+        # file into the repo (it's gitignored on purpose - see README).
+        # GOOGLE_CREDENTIALS_JSON lets you paste the whole key file's
+        # content into a single env var instead; if it's not set, fall
+        # back to reading the file from GOOGLE_CREDENTIALS_PATH, which is
+        # how local development works.
+        creds_json = os.environ.get("GOOGLE_CREDENTIALS_JSON")
+        if creds_json:
+            creds = Credentials.from_service_account_info(json.loads(creds_json), scopes=SCOPES)
+        else:
+            creds = Credentials.from_service_account_file(config.GOOGLE_CREDENTIALS_PATH, scopes=SCOPES)
         client = gspread.authorize(creds)
         self.sheet = client.open_by_key(config.SHEET_ID).worksheet(config.WORKSHEET_NAME)
         self._header = self.sheet.row_values(1)
