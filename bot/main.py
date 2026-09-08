@@ -1,6 +1,15 @@
 import logging
 
-from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler, filters
+from telegram import Update
+from telegram.ext import (
+    Application,
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    TypeHandler,
+    filters,
+)
 
 from . import config
 from .handlers import admin, trader
@@ -11,6 +20,26 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 logger = logging.getLogger(__name__)
 
 
+async def _log_incoming_chat_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Diagnostic only - runs before every other handler and logs which chat
+    an update came from. Use this to confirm the real MOD_GROUP_CHAT_ID:
+    send any message in the group you think is the mod group, then check
+    these logs for its actual chat id/type and compare against the
+    MOD_GROUP_CHAT_ID env var. Safe to leave in permanently - it's just a
+    log line, it doesn't change bot behavior."""
+    chat = update.effective_chat
+    if chat is None:
+        return
+    logger.info(
+        "incoming update: chat_id=%s chat_type=%s chat_title=%r configured_mod_group_id=%s match=%s",
+        chat.id,
+        chat.type,
+        chat.title,
+        config.MOD_GROUP_CHAT_ID,
+        chat.id == config.MOD_GROUP_CHAT_ID,
+    )
+
+
 def main():
     store = SheetStore()
 
@@ -18,13 +47,24 @@ def main():
     app.bot_data["store"] = store
     app.bot_data["mod_group_chat_id"] = config.MOD_GROUP_CHAT_ID
 
-    app.add_handler(CommandHandler("start", trader.start))
-    app.add_handler(CommandHandler("help", trader.help_command))
-    app.add_handler(CommandHandler("status", trader.status))
-    app.add_handler(CommandHandler("claim", trader.claim))
+    # Runs before everything else, in its own group, so it never blocks the
+    # real handlers - see _log_incoming_chat_id's docstring.
+    app.add_handler(TypeHandler(Update, _log_incoming_chat_id), group=-1)
+
+    # Trader-facing handlers (/start, /status, /claim, and the plain-text
+    # email/wallet flow) should never fire inside the mod group - otherwise
+    # a mod typing casual chat in there gets misread as a trader's email or
+    # wallet address. admin.py's handlers check _is_mod_group() themselves
+    # since they're meant to run ONLY there; these need the opposite.
+    not_mod_group = ~filters.Chat(chat_id=config.MOD_GROUP_CHAT_ID)
+
+    app.add_handler(CommandHandler("start", trader.start, filters=not_mod_group))
+    app.add_handler(CommandHandler("help", trader.help_command, filters=not_mod_group))
+    app.add_handler(CommandHandler("status", trader.status, filters=not_mod_group))
+    app.add_handler(CommandHandler("claim", trader.claim, filters=not_mod_group))
     app.add_handler(CommandHandler("invite", admin.invite))
     app.add_handler(CallbackQueryHandler(admin.handle_button))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, trader.handle_text))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & not_mod_group, trader.handle_text))
 
     app.job_queue.run_repeating(poll_sheet, interval=config.POLL_INTERVAL_SECONDS, first=10)
 
