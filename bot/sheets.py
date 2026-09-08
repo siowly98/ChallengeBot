@@ -62,6 +62,9 @@ class SheetStore:
         client = gspread.authorize(creds)
         self._spreadsheet = client.open_by_key(config.SHEET_ID)
         self.sheet = self._spreadsheet.worksheet(config.WORKSHEET_NAME)
+        # Startup sanity check only - a one-time snapshot, not something
+        # relied on afterwards. _col_index() always re-reads the live header
+        # for actual column lookups (see its docstring for why).
         self._header = self.sheet.row_values(1)
         for col in config.COLUMNS:
             if col not in self._header:
@@ -76,8 +79,22 @@ class SheetStore:
         self._config_cache_at = 0.0
 
     def _col_index(self, col_name: str) -> int:
-        # gspread is 1-indexed
-        return self._header.index(col_name) + 1
+        """Always re-reads the live header row rather than trusting
+        self._header (cached once at startup). The sheet's columns can
+        change without the bot restarting - most commonly, adding a
+        question to a Form that's linked to this sheet appends a new
+        response column. If a write resolved column position from a stale
+        cache, it would silently land the value in whatever now sits at
+        that old numeric position instead of the actual named column - no
+        error, just wrong data. One extra lightweight API call per write
+        is a small price for that not happening."""
+        header = self.sheet.row_values(1)
+        if col_name not in header:
+            raise RuntimeError(
+                f"Column '{col_name}' not found in the current header row: {header}. "
+                "Was it renamed or removed from the sheet?"
+            )
+        return header.index(col_name) + 1  # gspread is 1-indexed
 
     def _invalidate_rows_cache(self) -> None:
         self._rows_cache = None

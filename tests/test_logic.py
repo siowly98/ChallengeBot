@@ -21,7 +21,7 @@ from bot.handlers import admin, trader  # noqa: E402
 from bot.handlers.trader import WALLET_RE  # noqa: E402
 from bot.messages import render  # noqa: E402
 from bot.mod_cards import claim_requested_card, wallet_submitted_card  # noqa: E402
-from bot.sheets import _config_key, _truthy  # noqa: E402
+from bot.sheets import SheetStore, _config_key, _truthy  # noqa: E402
 
 
 def test_valid_wallet_address():
@@ -49,6 +49,55 @@ def test_falsy_values():
 def test_config_key_normalizes_sheet_header_style():
     assert _config_key("Prize Amount") == "prize_amount"
     assert _config_key(" Wallet Site URL ") == "wallet_site_url"
+
+
+def _bare_sheet_store() -> SheetStore:
+    """A SheetStore with __init__ skipped - it needs real Google credentials
+    and network access, which these tests don't have. Just sets the one
+    attribute _col_index/update_cells actually touch."""
+    store = SheetStore.__new__(SheetStore)
+    store.sheet = MagicMock()
+    return store
+
+
+def test_col_index_uses_the_live_header_not_a_stale_cache():
+    """Regression test: adding a column to the sheet (e.g. a new question on
+    a Form linked to it) without restarting the bot used to make writes land
+    in the wrong column, because _col_index resolved position from the
+    header cached at startup. It must always resolve against the sheet's
+    current header row instead."""
+    store = _bare_sheet_store()
+
+    store.sheet.row_values.return_value = ["Email Address", "ChatID", "TelegramUsername"]
+    assert store._col_index("TelegramUsername") == 3
+
+    # A column gets inserted (e.g. a new Form question) - TelegramUsername
+    # is now one column further right, with no bot restart in between.
+    store.sheet.row_values.return_value = ["Email Address", "NewQuestion", "ChatID", "TelegramUsername"]
+    assert store._col_index("TelegramUsername") == 4  # must track the live position, not stay at 3
+
+
+def test_col_index_raises_a_clear_error_for_a_missing_column():
+    store = _bare_sheet_store()
+    store.sheet.row_values.return_value = ["Email Address", "ChatID"]
+
+    try:
+        store._col_index("TelegramUsername")
+        assert False, "expected a RuntimeError"
+    except RuntimeError as e:
+        assert "TelegramUsername" in str(e)
+
+
+def test_update_cells_writes_to_the_live_column_after_a_header_change():
+    store = _bare_sheet_store()
+    store._rows_cache = None
+    store.sheet.row_values.return_value = ["Email Address", "NewQuestion", "ChatID", "TelegramUsername"]
+
+    store.update_cells(5, {"TelegramUsername": "leo"})
+
+    data = store.sheet.batch_update.call_args[0][0]
+    assert data[0]["range"] == "D5"  # TelegramUsername is column 4 in the live header
+    assert data[0]["values"] == [["leo"]]
 
 
 def test_render_fills_config_and_extra_placeholders():

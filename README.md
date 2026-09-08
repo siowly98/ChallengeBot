@@ -97,6 +97,15 @@ reuse or reactivate an old row from a previous round - its `ApprovalSent`,
 filled in from last time, which will make the bot think that round's steps
 already happened and skip sending this round's messages entirely.
 
+**Adding a Form question later.** If you add a new question to a Form
+that's already linked to this sheet, Google appends a new response column
+- fine, no restart needed. The bot always resolves which column to write
+to from the sheet's current header row (not a cached position), so
+existing columns don't need to be in any particular order and adding one
+doesn't require redeploying. Just make sure the new question's column
+header doesn't accidentally collide with one of the bot's own column
+names in `bot/config.py`'s `COLUMNS` list.
+
 ### 3. Give the bot access to the sheet (Google service account)
 
 1. In [Google Cloud Console](https://console.cloud.google.com/), create a
