@@ -44,8 +44,10 @@ DUPLICATE_EMAIL = (
 
 DUPLICATE_WALLET = (
     "That wallet address is already registered under a different application.\n\n"
-    "Each wallet can only be used once. If you think this is a mistake, message a mod "
-    f"here: {CONTACT_LINK}"
+    "Each wallet can only be used once - but you're not stuck. Just send a different "
+    "wallet address here and we'll use that one instead. (If you logged in with the "
+    "wrong account, log back in with the right one and copy that address.)\n\n"
+    f"Don't have another wallet, or think this is a mistake? Message a mod: {CONTACT_LINK}"
 )
 
 HELP = (
