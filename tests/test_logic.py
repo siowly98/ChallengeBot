@@ -53,10 +53,12 @@ def test_config_key_normalizes_sheet_header_style():
 
 def _bare_sheet_store() -> SheetStore:
     """A SheetStore with __init__ skipped - it needs real Google credentials
-    and network access, which these tests don't have. Just sets the one
-    attribute _col_index/update_cells actually touch."""
+    and network access, which these tests don't have. Sets just the
+    attributes the methods under test actually touch."""
     store = SheetStore.__new__(SheetStore)
     store.sheet = MagicMock()
+    store._rows_cache = None
+    store._rows_cache_at = 0.0
     return store
 
 
@@ -90,7 +92,6 @@ def test_col_index_raises_a_clear_error_for_a_missing_column():
 
 def test_update_cells_writes_to_the_live_column_after_a_header_change():
     store = _bare_sheet_store()
-    store._rows_cache = None
     store.sheet.row_values.return_value = ["Email Address", "NewQuestion", "ChatID", "TelegramUsername"]
 
     store.update_cells(5, {"TelegramUsername": "leo"})
@@ -98,6 +99,25 @@ def test_update_cells_writes_to_the_live_column_after_a_header_change():
     data = store.sheet.batch_update.call_args[0][0]
     assert data[0]["range"] == "D5"  # TelegramUsername is column 4 in the live header
     assert data[0]["values"] == [["leo"]]
+
+
+def test_all_rows_validates_against_required_columns_not_a_stale_snapshot():
+    """Regression test: all_rows() used to pass a header snapshot cached at
+    bot startup as expected_headers. gspread requires expected_headers to
+    be a subset of the CURRENT live header or it raises - so any drift in
+    the sheet's columns since boot, even to an unrelated/new column (e.g.
+    adding a Form question), broke every read in the bot at once. It must
+    validate against config.COLUMNS (the bot's actual required columns,
+    which never goes stale) instead."""
+    from bot import config as bot_config
+
+    store = _bare_sheet_store()
+    store.sheet.get_all_records.return_value = []
+
+    store.all_rows()
+
+    _, kwargs = store.sheet.get_all_records.call_args
+    assert kwargs["expected_headers"] == bot_config.COLUMNS
 
 
 def test_render_fills_config_and_extra_placeholders():

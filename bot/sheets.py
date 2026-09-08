@@ -62,12 +62,13 @@ class SheetStore:
         client = gspread.authorize(creds)
         self._spreadsheet = client.open_by_key(config.SHEET_ID)
         self.sheet = self._spreadsheet.worksheet(config.WORKSHEET_NAME)
-        # Startup sanity check only - a one-time snapshot, not something
-        # relied on afterwards. _col_index() always re-reads the live header
-        # for actual column lookups (see its docstring for why).
-        self._header = self.sheet.row_values(1)
+        # Startup sanity check only - a local variable, not stored on self.
+        # Nothing afterwards should trust a header snapshot taken once at
+        # boot (see _col_index's docstring, and all_rows()'s use of
+        # config.COLUMNS instead of a cached snapshot, for why).
+        header = self.sheet.row_values(1)
         for col in config.COLUMNS:
-            if col not in self._header:
+            if col not in header:
                 raise RuntimeError(
                     f"Worksheet '{config.WORKSHEET_NAME}' is missing required column '{col}'. "
                     f"Expected header row: {config.COLUMNS}"
@@ -79,15 +80,15 @@ class SheetStore:
         self._config_cache_at = 0.0
 
     def _col_index(self, col_name: str) -> int:
-        """Always re-reads the live header row rather than trusting
-        self._header (cached once at startup). The sheet's columns can
-        change without the bot restarting - most commonly, adding a
-        question to a Form that's linked to this sheet appends a new
-        response column. If a write resolved column position from a stale
-        cache, it would silently land the value in whatever now sits at
-        that old numeric position instead of the actual named column - no
-        error, just wrong data. One extra lightweight API call per write
-        is a small price for that not happening."""
+        """Always re-reads the live header row rather than trusting a
+        snapshot cached at startup. The sheet's columns can change without
+        the bot restarting - most commonly, adding a question to a Form
+        that's linked to this sheet appends a new response column. If a
+        write resolved column position from a stale cache, it would
+        silently land the value in whatever now sits at that old numeric
+        position instead of the actual named column - no error, just wrong
+        data. One extra lightweight API call per write is a small price
+        for that not happening."""
         header = self.sheet.row_values(1)
         if col_name not in header:
             raise RuntimeError(
@@ -103,11 +104,22 @@ class SheetStore:
         """Returns every data row as a dict, plus its 1-indexed sheet row number under '_row'.
         Cached briefly (see _ROWS_CACHE_TTL_SECONDS) - any write through this
         store clears the cache immediately, so this never serves stale data
-        back to the same request that just wrote something."""
+        back to the same request that just wrote something.
+
+        expected_headers is config.COLUMNS (the bot's actual required
+        columns), not a snapshot of the live header taken at some earlier
+        point in time. gspread requires expected_headers to be a subset of
+        the CURRENT header row or it raises - passing a stale snapshot here
+        used to mean any drift in the sheet's columns since the bot last
+        started (a renamed/retyped/removed column, e.g. while adding a new
+        Form question) broke every read in the bot at once, since every
+        read goes through this method. config.COLUMNS never goes stale and
+        only checks what's actually required, so a new optional column
+        (a Form question, a repeat-participant column) never trips it."""
         now = time.monotonic()
         if self._rows_cache is not None and (now - self._rows_cache_at) < _ROWS_CACHE_TTL_SECONDS:
             return self._rows_cache
-        records = self.sheet.get_all_records(expected_headers=self._header)
+        records = self.sheet.get_all_records(expected_headers=config.COLUMNS)
         rows = [{**r, "_row": i + 2} for i, r in enumerate(records)]  # +2: header row + 1-index
         self._rows_cache = rows
         self._rows_cache_at = now
