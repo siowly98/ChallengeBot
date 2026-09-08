@@ -13,7 +13,8 @@ os.environ.setdefault("SHEET_ID", "test-sheet")
 os.environ.setdefault("MOD_GROUP_CHAT_ID", "-1001234567890")
 
 from bot.handlers.trader import WALLET_RE  # noqa: E402
-from bot.sheets import _truthy  # noqa: E402
+from bot.messages import render  # noqa: E402
+from bot.sheets import _config_key, _truthy  # noqa: E402
 
 
 def test_valid_wallet_address():
@@ -36,3 +37,14 @@ def test_truthy_values():
 def test_falsy_values():
     for v in ["", "FALSE", "no", "0", None]:
         assert _truthy(v) is False
+
+
+def test_config_key_normalizes_sheet_header_style():
+    assert _config_key("Prize Amount") == "prize_amount"
+    assert _config_key(" Wallet Site URL ") == "wallet_site_url"
+
+
+def test_render_fills_config_and_extra_placeholders():
+    cfg = {"prize_amount": "$100"}
+    result = render("Win {prize_amount}, here: {claim_instructions_link}", cfg, claim_instructions_link="x.co")
+    assert result == "Win $100, here: x.co"

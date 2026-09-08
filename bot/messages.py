@@ -1,13 +1,19 @@
 """All trader-facing copy lives here so non-engineers can edit wording
-without touching handler logic. Keep it plain — see ELI5 note in README."""
+without touching handler logic. Keep it plain — see ELI5 note in README.
 
-# ── Challenge settings — edit these each round, nothing else needs to change ──
-CHALLENGE_START_DATE = "Monday, August 31"   # e.g. "Monday, August 31"
-CHALLENGE_DURATION = "3 days"                # e.g. "3 days" — the clock starts at funding
-START_AMOUNT = "$5,000"
-TARGET_AMOUNT = "$10,000"
-PRIZE_AMOUNT = "$100"
-WALLET_SITE_URL = "testnet.avantisfi.com"    # where traders log in to get their testnet wallet
+Challenge settings (dates, amounts, prize, links) are NOT hardcoded here.
+They live in the "Config" tab of the Google Sheet, so changing them each
+round is just editing spreadsheet cells - no code, no git, no redeploy.
+See bot/config.py for the full list of keys and bot/sheets.py's
+get_config() for how they're read. Any template below with a {placeholder}
+like {prize_amount} gets it filled in from that sheet via render()."""
+
+
+def render(template: str, cfg: dict, **extra) -> str:
+    """Fills a message template with the sheet's Config values, plus any
+    per-call extras (like `reason` or `invite_link`) that are specific to
+    that one message rather than a setting that repeats every round."""
+    return template.format(**cfg, **extra)
 
 WELCOME = (
     "Welcome to the Avantis Challenge bot! 👋\n\n"
@@ -43,11 +49,11 @@ LINK_SUCCESS_NOT_YET_REVIEWED = (
 )
 
 APPROVAL_AND_WALLET_REQUEST = (
-    f"Gmgm 👋 You've been selected for the Avantis {START_AMOUNT} → {TARGET_AMOUNT} Challenge! 🎉\n\n"
-    f"The challenge starts {CHALLENGE_START_DATE}. You'll get {START_AMOUNT} in practice funds and have "
-    f"{CHALLENGE_DURATION} to reach {TARGET_AMOUNT}+ and win {PRIZE_AMOUNT}. Trade any asset, any leverage.\n\n"
+    "Gmgm 👋 You've been selected for the Avantis {start_amount} → {target_amount} Challenge! 🎉\n\n"
+    "The challenge starts {challenge_start_date}. You'll get {start_amount} in practice funds and have "
+    "{challenge_duration} to reach {target_amount}+ and win {prize_amount}. Trade any asset, any leverage.\n\n"
     "⚠️ First step — send us your wallet address:\n\n"
-    f"1. Go to {WALLET_SITE_URL}\n"
+    "1. Go to {wallet_site_url}\n"
     "2. Log in using the same method you used when applying — Google, email, or phone.\n"
     "3. Your wallet is created automatically.\n"
     "4. Click your wallet/address in the top-right corner and copy the full address starting with \"0x\".\n"
@@ -67,10 +73,10 @@ INVALID_WALLET_FORMAT = (
 )
 
 FUNDED_AND_GUIDE = (
-    f"{START_AMOUNT} USDC is in! 🐆🔥\n\n"
-    f"You're officially live in the {CHALLENGE_DURATION} {START_AMOUNT} → {TARGET_AMOUNT} Challenge from "
+    "{start_amount} USDC is in! 🐆🔥\n\n"
+    "You're officially live in the {challenge_duration} {start_amount} → {target_amount} Challenge from "
     "this exact moment. ⏱️\n\n"
-    f"Reach a {TARGET_AMOUNT}+ balance before time's up and win {PRIZE_AMOUNT}. LFG! 🚀\n\n"
+    "Reach a {target_amount}+ balance before time's up and win {prize_amount}. LFG! 🚀\n\n"
     "Setup guide, in case you need it:\n{guide_link}\n\n"
     "When you think you've hit the target, come back here and send /claim.\n\n"
     "Also — if you want to share your challenge journey on social media, send us the link, we'd love to "
@@ -92,7 +98,7 @@ CLAIM_ALREADY_SUBMITTED = (
 )
 
 CLAIM_VERIFIED = (
-    f"Confirmed — you did it! Here's how to claim your {PRIZE_AMOUNT} prize:\n" + "{claim_instructions}"
+    "Confirmed — you did it! Here's how to claim your {prize_amount} prize:\n{claim_instructions_link}"
 )
 
 CLAIM_REJECTED = (

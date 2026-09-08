@@ -11,8 +11,6 @@ from telegram.ext import ContextTypes
 from .. import messages
 from ..sheets import SheetStore
 
-CLAIM_INSTRUCTIONS_LINK = "https://your-doc-link-here/claim-instructions"  # TODO: fill in
-
 
 def get_store(context: ContextTypes.DEFAULT_TYPE) -> SheetStore:
     return context.bot_data["store"]
@@ -38,20 +36,22 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mod_name = query.from_user.first_name
 
     if action == "fund":
+        cfg = store.get_config()
         store.update_cell(row["_row"], "Funded", "TRUE")
         store.update_cell(row["_row"], "GuideSent", "TRUE")
         await context.bot.send_message(
             chat_id=int(row["ChatID"]),
-            text=messages.FUNDED_AND_GUIDE.format(guide_link="https://your-doc-link-here/setup-guide"),
+            text=messages.render(messages.FUNDED_AND_GUIDE, cfg),
         )
         await query.edit_message_text(f"{query.message.text}\n\n✅ Funded by {mod_name}", parse_mode="Markdown")
 
     elif action == "verify":
+        cfg = store.get_config()
         store.update_cell(row["_row"], "ClaimStatus", "VERIFIED")
         store.update_cell(row["_row"], "ClaimInstructionsSent", "TRUE")
         await context.bot.send_message(
             chat_id=int(row["ChatID"]),
-            text=messages.CLAIM_VERIFIED.format(claim_instructions=CLAIM_INSTRUCTIONS_LINK),
+            text=messages.render(messages.CLAIM_VERIFIED, cfg),
         )
         await query.edit_message_text(f"{query.message.text}\n\n✅ Verified by {mod_name}", parse_mode="Markdown")
 

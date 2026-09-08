@@ -17,6 +17,7 @@ async def poll_sheet(context: ContextTypes.DEFAULT_TYPE):
     store = context.bot_data["store"]
     try:
         rows = store.all_rows()
+        cfg = store.get_config()
     except Exception:
         logger.exception("Failed to read sheet during poll")
         return
@@ -28,13 +29,15 @@ async def poll_sheet(context: ContextTypes.DEFAULT_TYPE):
 
         try:
             if store.is_true(row, "Eligible") and not store.is_true(row, "ApprovalSent"):
-                await context.bot.send_message(chat_id=int(chat_id), text=messages.APPROVAL_AND_WALLET_REQUEST)
+                await context.bot.send_message(
+                    chat_id=int(chat_id), text=messages.render(messages.APPROVAL_AND_WALLET_REQUEST, cfg)
+                )
                 store.update_cell(row["_row"], "ApprovalSent", "TRUE")
 
             if store.is_true(row, "Funded") and not store.is_true(row, "GuideSent"):
                 await context.bot.send_message(
                     chat_id=int(chat_id),
-                    text=messages.FUNDED_AND_GUIDE.format(guide_link="https://your-doc-link-here/setup-guide"),
+                    text=messages.render(messages.FUNDED_AND_GUIDE, cfg),
                 )
                 store.update_cell(row["_row"], "GuideSent", "TRUE")
         except Exception:

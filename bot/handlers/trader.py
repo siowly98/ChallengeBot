@@ -99,7 +99,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if store.is_true(match, "Eligible"):
             store.update_cell(match["_row"], "ApprovalSent", "TRUE")
-            await update.message.reply_text(messages.APPROVAL_AND_WALLET_REQUEST)
+            cfg = store.get_config()
+            await update.message.reply_text(messages.render(messages.APPROVAL_AND_WALLET_REQUEST, cfg))
         else:
             await update.message.reply_text(messages.LINK_SUCCESS_NOT_YET_REVIEWED)
         return

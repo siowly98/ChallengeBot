@@ -15,6 +15,7 @@ import os
 
 import gspread
 from google.oauth2.service_account import Credentials
+from gspread.exceptions import WorksheetNotFound
 
 from . import config
 
@@ -27,6 +28,12 @@ TRUTHY = {"TRUE", "YES", "Y", "1"}
 
 def _truthy(value) -> bool:
     return str(value).strip().upper() in TRUTHY
+
+
+def _config_key(raw: str) -> str:
+    """Turns a Config sheet's "Key" cell (e.g. "Prize Amount") into the
+    matching CONFIG_DEFAULTS/template key ("prize_amount")."""
+    return raw.strip().lower().replace(" ", "_")
 
 
 class SheetStore:
@@ -43,7 +50,8 @@ class SheetStore:
         else:
             creds = Credentials.from_service_account_file(config.GOOGLE_CREDENTIALS_PATH, scopes=SCOPES)
         client = gspread.authorize(creds)
-        self.sheet = client.open_by_key(config.SHEET_ID).worksheet(config.WORKSHEET_NAME)
+        self._spreadsheet = client.open_by_key(config.SHEET_ID)
+        self.sheet = self._spreadsheet.worksheet(config.WORKSHEET_NAME)
         self._header = self.sheet.row_values(1)
         for col in config.COLUMNS:
             if col not in self._header:
@@ -82,6 +90,24 @@ class SheetStore:
 
     def update_cell(self, row_number: int, col_name: str, value) -> None:
         self.sheet.update_cell(row_number, self._col_index(col_name), value)
+
+    def get_config(self) -> dict:
+        """Reads the Config tab (Key | Value columns) into a dict, filling
+        in anything missing - or the whole tab, if it doesn't exist yet -
+        from CONFIG_DEFAULTS. This is what lets a mod change the challenge
+        dates/amounts/prize/links by editing spreadsheet cells instead of
+        code."""
+        cfg = dict(config.CONFIG_DEFAULTS)
+        try:
+            tab = self._spreadsheet.worksheet(config.CONFIG_WORKSHEET_NAME)
+        except WorksheetNotFound:
+            return cfg
+        for row in tab.get_all_records():
+            key = _config_key(str(row.get("Key", "")))
+            value = str(row.get("Value", "")).strip()
+            if key and value:
+                cfg[key] = value
+        return cfg
 
     @staticmethod
     def is_true(row: dict, col_name: str) -> bool:

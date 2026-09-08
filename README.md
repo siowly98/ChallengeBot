@@ -47,15 +47,17 @@ Use (or create) a Google Sheet with a tab whose **first row** has exactly
 these column headers (order doesn't matter, spelling does):
 
 ```
-Timestamp | Email | TelegramUsername | ChatID | Eligible | ApprovalSent |
+Timestamp | Email Address | TelegramUsername | ChatID | Eligible | ApprovalSent |
 WalletAddress | Funded | GuideSent | ClaimStatus | ClaimInstructionsSent | Notes
 ```
 
 If your Google Form responses already land in a sheet, just add the
-columns the bot manages (`ChatID`, `Eligible`, `ApprovalSent`,
-`WalletAddress`, `Funded`, `GuideSent`, `ClaimStatus`,
+columns the bot manages (`TelegramUsername`, `ChatID`, `Eligible`,
+`ApprovalSent`, `WalletAddress`, `Funded`, `GuideSent`, `ClaimStatus`,
 `ClaimInstructionsSent`, `Notes`) to that same tab — `Timestamp` and
-`Email` should already be there from the Form.
+`Email Address` should already be there from the Form. Note:
+`TelegramUsername` (bot-managed) is separate from any self-reported
+"Your Telegram @username" column your form already has — keep both.
 
 `Eligible` and `Funded` are the two columns a mod ticks by hand when
 reviewing (checkbox format works fine — the bot reads TRUE/FALSE/YES/1 as
@@ -95,14 +97,30 @@ python3 -m bot.main
 
 If it starts without errors, message your bot `/start` to test the flow.
 
-### 6. Fill in the placeholder links
+### 6. Add the Config tab (challenge settings)
 
-Two spots in the code have placeholder URLs you need to replace with your
-real content:
+Add a second tab to the same Google Sheet, named exactly `Config`, with two
+columns: `Key` and `Value`. This is where you set the things that change
+every round — no code, no Terminal, no git required. Fill in a row for
+each of these keys:
 
-- `bot/handlers/admin.py` → `CLAIM_INSTRUCTIONS_LINK`
-- `bot/jobs.py` and `bot/handlers/admin.py` → the `guide_link` passed into
-  `messages.FUNDED_AND_GUIDE` (setup guide link)
+| Key | Example value |
+| --- | --- |
+| `Challenge Start Date` | `Monday, August 31` |
+| `Challenge Duration` | `3 days` |
+| `Start Amount` | `$5,000` |
+| `Target Amount` | `$10,000` |
+| `Prize Amount` | `$100` |
+| `Wallet Site URL` | `testnet.avantisfi.com` |
+| `Guide Link` | link to your setup guide |
+| `Claim Instructions Link` | link to your prize-claim instructions |
+
+Key names aren't case-sensitive and ignore spacing (`Prize Amount`,
+`prize amount`, and `PRIZE_AMOUNT` all work) — use whatever's readable.
+If you leave the whole tab out, or leave a row blank, the bot just uses
+its built-in defaults for that value instead of breaking, so you can add
+this gradually. Changes take effect on the very next message the bot
+sends — no restart needed.
 
 ## Deploying so it runs continuously
 
@@ -116,8 +134,12 @@ the repo).
 
 ## Editing trader-facing copy
 
-All the messages traders see live in `bot/messages.py` as plain strings —
-edit wording there without touching any logic.
+All the messages traders see live in `bot/messages.py` as plain strings.
+Anything that changes **every round** (dates, amounts, prize, links) is a
+`{placeholder}` filled in from the Config tab — edit it in the sheet (see
+step 6 above), not here. Anything else — actual wording, emoji, tone —
+does live here as code, so editing it still means a code change + git
+push + Railway redeploy.
 
 ## Mod commands (used inside the mod group)
 
