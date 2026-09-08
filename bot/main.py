@@ -29,7 +29,7 @@ async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
     if isinstance(update, Update) and update.effective_message:
         try:
             await update.effective_message.reply_text(
-                "Something went wrong on our end — please try again in a moment. "
+                "Something went wrong on our end - please try again in a moment. "
                 "If it keeps happening, message a mod."
             )
         except Exception:

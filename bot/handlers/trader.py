@@ -63,7 +63,7 @@ async def claim(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(messages.CLAIM_ALREADY_SUBMITTED)
         return
     if row.get("ClaimStatus") == "VERIFIED":
-        await update.message.reply_text("You're already verified — check earlier messages for your claim steps.")
+        await update.message.reply_text("You're already verified - check earlier messages for your claim steps.")
         return
 
     await asyncio.to_thread(store.update_cell, row["_row"], "ClaimStatus", "REQUESTED")
@@ -94,6 +94,15 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(messages.EMAIL_NOT_FOUND)
             return
 
+        existing_chat_id = str(match.get("ChatID") or "").strip()
+        if existing_chat_id and existing_chat_id != str(chat_id):
+            # Someone (possibly this same person on a second account) is
+            # trying to claim an application slot that's already linked to
+            # a different Telegram account - block it rather than letting
+            # a second account ride along on the same application.
+            await update.message.reply_text(messages.DUPLICATE_EMAIL)
+            return
+
         # Link ChatID + username, and (if already eligible) ApprovalSent -
         # all decided before touching the network, then written in one
         # batched call instead of up to three separate round trips.
@@ -120,11 +129,20 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not WALLET_RE.match(text):
             await update.message.reply_text(messages.INVALID_WALLET_FORMAT)
             return
+
+        existing = await asyncio.to_thread(store.find_by_wallet, text)
+        if existing is not None and existing["_row"] != row["_row"]:
+            # Same wallet already sitting on someone else's row - block it
+            # rather than letting one wallet get funded twice.
+            await update.message.reply_text(messages.DUPLICATE_WALLET)
+            return
+
         await asyncio.to_thread(store.update_cell, row["_row"], "WalletAddress", text)
         await update.message.reply_text(messages.WALLET_RECEIVED)
 
         row["WalletAddress"] = text
-        card_text, keyboard = wallet_submitted_card(row)
+        cfg = await asyncio.to_thread(store.get_config)
+        card_text, keyboard = wallet_submitted_card(row, cfg)
         await context.bot.send_message(
             chat_id=context.bot_data["mod_group_chat_id"],
             text=card_text,

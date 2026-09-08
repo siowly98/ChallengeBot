@@ -61,7 +61,9 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await asyncio.to_thread(store.update_cell, row["_row"], "ClaimStatus", "REJECTED")
         await context.bot.send_message(
             chat_id=int(row["ChatID"]),
-            text=messages.CLAIM_REJECTED.format(reason="Message a mod if you have questions."),
+            text=messages.CLAIM_REJECTED.format(
+                reason=f"Message a mod if you have questions: {messages.CONTACT_LINK}"
+            ),
         )
         await query.edit_message_text(f"{query.message.text}\n\n❌ Rejected by {mod_name}", parse_mode="Markdown")
 

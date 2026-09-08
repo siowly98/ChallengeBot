@@ -39,7 +39,7 @@ CONFIG_DEFAULTS = {
 }
 
 # Column layout in the worksheet. Row 1 must be a header row with exactly
-# these names (any order — the bot looks columns up by header, not position).
+# these names (any order - the bot looks columns up by header, not position).
 COLUMNS = [
     "Timestamp",
     "Email Address",

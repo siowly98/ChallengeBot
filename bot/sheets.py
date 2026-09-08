@@ -109,6 +109,16 @@ class SheetStore:
                 return row
         return None
 
+    def find_by_wallet(self, wallet: str) -> dict | None:
+        """Used to block wallet reuse - one wallet address per application,
+        so someone can't submit the same funded wallet under a second
+        application/Telegram account to try to get funded twice."""
+        wallet = wallet.strip().lower()
+        for row in self.all_rows():
+            if str(row.get("WalletAddress", "")).strip().lower() == wallet:
+                return row
+        return None
+
     def find_by_row(self, row_number: int) -> dict | None:
         for row in self.all_rows():
             if row["_row"] == row_number:
