@@ -121,7 +121,7 @@ FUNDED_AND_GUIDE = (
     "You're officially live in the {challenge_duration} {start_amount} → {target_amount} Challenge from "
     "this exact moment. ⏱️\n\n"
     "Reach a {target_amount}+ balance before time's up and win {prize_amount}. LFG! 🚀\n\n"
-    "Setup guide, in case you need it:\n{guide_link}\n\n"
+    "Read the full rules and details here:\n{guide_link}\n\n"
     "When you think you've hit the target, come back here and send /claim.\n\n"
     "Also - if you want to share your challenge journey on social media, send us the link, we'd love to "
     "support and amplify it! 🫡"
