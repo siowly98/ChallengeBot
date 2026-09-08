@@ -83,6 +83,12 @@ WALLET_RECEIVED = (
     "and message you here once it's done."
 )
 
+WALLET_SUBMIT_RETRY = (
+    "Hmm, something went wrong on our end saving that and we couldn't log it properly. "
+    "Nothing's lost - please send your wallet address here again in a moment.\n\n"
+    f"If it keeps failing, message a mod: {CONTACT_LINK}"
+)
+
 INVALID_WALLET_FORMAT = (
     "That doesn't look like a valid wallet address (expected something like 0x1234...). "
     "Please double check and send it again."
@@ -107,6 +113,12 @@ CLAIM_NOT_ELIGIBLE = (
 CLAIM_RECEIVED = (
     "Claim received! We're manually checking your account now - this isn't instant, "
     "we'll message you here once it's confirmed."
+)
+
+CLAIM_SUBMIT_RETRY = (
+    "Hmm, something went wrong on our end submitting that claim and we couldn't log it "
+    "properly. Nothing's lost - please send /claim again in a moment.\n\n"
+    f"If it keeps failing, message a mod: {CONTACT_LINK}"
 )
 
 CLAIM_ALREADY_SUBMITTED = (

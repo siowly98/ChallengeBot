@@ -126,15 +126,21 @@ class SheetStore:
         return None
 
     def update_cell(self, row_number: int, col_name: str, value) -> None:
-        self.sheet.update_cell(row_number, self._col_index(col_name), value)
-        self._invalidate_rows_cache()
+        # Delegates to update_cells so single- and multi-cell writes share
+        # one code path (and one value_input_option - see below).
+        self.update_cells(row_number, {col_name: value})
 
     def update_cells(self, row_number: int, updates: dict) -> None:
         """Writes several columns for one row in a single API call instead
         of one round trip per column - e.g. linking ChatID + TelegramUsername
         together, or Funded + GuideSent together. Cuts latency (fewer round
-        trips) and API quota use (fewer requests) versus calling
-        update_cell() several times in a row for the same row."""
+        trips) and API quota use (fewer requests) versus one write per column.
+
+        Uses RAW, not USER_ENTERED: this sheet is a database, so values must
+        be stored exactly as given. USER_ENTERED would let Sheets reinterpret
+        them - a numeric ChatID becomes a float (risking precision loss on
+        long IDs), and anything that looked like a formula or date would be
+        silently transformed. RAW stores the literal string every time."""
         if not updates:
             return
         data = [
@@ -144,7 +150,7 @@ class SheetStore:
             }
             for col, value in updates.items()
         ]
-        self.sheet.batch_update(data, value_input_option="USER_ENTERED")
+        self.sheet.batch_update(data, value_input_option="RAW")
         self._invalidate_rows_cache()
 
     def get_config(self) -> dict:

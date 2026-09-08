@@ -5,6 +5,7 @@ for a mod to act on a card, or reflects a decision a mod already made in
 the sheet.
 """
 import asyncio
+import logging
 import re
 
 from telegram import Update
@@ -14,11 +15,40 @@ from .. import messages
 from ..mod_cards import claim_requested_card, wallet_submitted_card
 from ..sheets import SheetStore
 
+logger = logging.getLogger(__name__)
+
 WALLET_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")
 
 
 def get_store(context: ContextTypes.DEFAULT_TYPE) -> SheetStore:
     return context.bot_data["store"]
+
+
+async def _post_mod_card(context: ContextTypes.DEFAULT_TYPE, text: str, keyboard) -> bool:
+    """Sends a card to the mod group. Returns True on success, False if it
+    couldn't be delivered after one retry.
+
+    This is the linchpin of the two flows that write to the sheet and THEN
+    tell the mods about it (wallet submitted, claim requested). If the card
+    send fails after the sheet write, the row is left in a state the poll
+    loop doesn't cover - a wallet on file with no fundable card, or a
+    REQUESTED claim with no verify/reject card - and the trader has no way
+    to re-trigger it. So the callers roll their write back when this returns
+    False, which puts the row back to a state the trader can retry from."""
+    for attempt in range(2):
+        try:
+            await context.bot.send_message(
+                chat_id=context.bot_data["mod_group_chat_id"],
+                text=text,
+                reply_markup=keyboard,
+                parse_mode="Markdown",
+            )
+            return True
+        except Exception:
+            logger.exception("Failed to post mod card (attempt %s of 2)", attempt + 1)
+            if attempt == 0:
+                await asyncio.sleep(1)
+    return False
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -67,16 +97,16 @@ async def claim(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await asyncio.to_thread(store.update_cell, row["_row"], "ClaimStatus", "REQUESTED")
-    await update.message.reply_text(messages.CLAIM_RECEIVED)
-
     row["ClaimStatus"] = "REQUESTED"
     text, keyboard = claim_requested_card(row)
-    await context.bot.send_message(
-        chat_id=context.bot_data["mod_group_chat_id"],
-        text=text,
-        reply_markup=keyboard,
-        parse_mode="Markdown",
-    )
+
+    if await _post_mod_card(context, text, keyboard):
+        await update.message.reply_text(messages.CLAIM_RECEIVED)
+    else:
+        # Card never reached the mods - roll the status back so /claim works
+        # again, instead of leaving a REQUESTED claim no mod can see or act on.
+        await asyncio.to_thread(store.update_cell, row["_row"], "ClaimStatus", "")
+        await update.message.reply_text(messages.CLAIM_SUBMIT_RETRY)
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -138,17 +168,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         await asyncio.to_thread(store.update_cell, row["_row"], "WalletAddress", text)
-        await update.message.reply_text(messages.WALLET_RECEIVED)
-
         row["WalletAddress"] = text
         cfg = await asyncio.to_thread(store.get_config)
         card_text, keyboard = wallet_submitted_card(row, cfg)
-        await context.bot.send_message(
-            chat_id=context.bot_data["mod_group_chat_id"],
-            text=card_text,
-            reply_markup=keyboard,
-            parse_mode="Markdown",
-        )
+
+        if await _post_mod_card(context, card_text, keyboard):
+            await update.message.reply_text(messages.WALLET_RECEIVED)
+        else:
+            # Card never reached the mods - roll the wallet write back so the
+            # row returns to "awaiting wallet" and the trader can just resend,
+            # instead of being silently stuck with a wallet on file and no
+            # fundable card (the exact stuck state we hit before).
+            await asyncio.to_thread(store.update_cell, row["_row"], "WalletAddress", "")
+            await update.message.reply_text(messages.WALLET_SUBMIT_RETRY)
         return
 
     # Anything else that doesn't match a known state - point them at /status

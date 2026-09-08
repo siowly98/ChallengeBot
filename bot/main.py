@@ -2,6 +2,7 @@ import logging
 
 from telegram import Update
 from telegram.ext import (
+    AIORateLimiter,
     Application,
     CallbackQueryHandler,
     CommandHandler,
@@ -41,12 +42,14 @@ async def _log_incoming_chat_id(update: Update, context: ContextTypes.DEFAULT_TY
     an update came from. Use this to confirm the real MOD_GROUP_CHAT_ID:
     send any message in the group you think is the mod group, then check
     these logs for its actual chat id/type and compare against the
-    MOD_GROUP_CHAT_ID env var. Safe to leave in permanently - it's just a
-    log line, it doesn't change bot behavior."""
+    MOD_GROUP_CHAT_ID env var. Logs at DEBUG so it stays quiet in normal
+    operation (it fired on every single update, which is noise at scale) -
+    set the log level to DEBUG temporarily if you need to read chat IDs
+    again."""
     chat = update.effective_chat
     if chat is None:
         return
-    logger.info(
+    logger.debug(
         "incoming update: chat_id=%s chat_type=%s chat_title=%r configured_mod_group_id=%s match=%s",
         chat.id,
         chat.type,
@@ -63,7 +66,19 @@ def main():
     # once instead of processing them one at a time - without this, one
     # slow Sheets API call would hold up every other user's message behind
     # it, which is the main reason things felt slow under any real load.
-    app = Application.builder().token(config.BOT_TOKEN).concurrent_updates(True).build()
+    #
+    # AIORateLimiter throttles OUTGOING messages under Telegram's limits
+    # (~30 msg/s globally, ~20/min per group) and automatically waits out
+    # 429 "retry after" responses. This matters when a mod bulk-approves a
+    # wave of applicants: without it, the poll loop would fire messages
+    # faster than Telegram allows and some would bounce.
+    app = (
+        Application.builder()
+        .token(config.BOT_TOKEN)
+        .concurrent_updates(True)
+        .rate_limiter(AIORateLimiter())
+        .build()
+    )
     app.bot_data["store"] = store
     app.bot_data["mod_group_chat_id"] = config.MOD_GROUP_CHAT_ID
     app.add_error_handler(on_error)
