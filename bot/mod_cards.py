@@ -15,8 +15,12 @@ replying to the trader) already succeeded - so this isn't cosmetic, it's
 what makes the mod group actually receive the card at all.
 """
 
+from datetime import datetime, timezone
+
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.helpers import escape_markdown
+
+from .deadlines import compute_deadline, format_deadline, format_timedelta
 
 
 def _md(value) -> str:
@@ -59,12 +63,27 @@ def wallet_submitted_card(row: dict, cfg: dict):
     return text, keyboard
 
 
-def claim_requested_card(row: dict):
+def claim_requested_card(row: dict, cfg: dict):
+    # Mods decide whether a late claim still counts - see README - so the
+    # card needs to show them the deadline and whether this was on time,
+    # rather than making them go check /status or the sheet separately.
+    deadline_line = ""
+    deadline = compute_deadline(row.get("FundedAt"), cfg.get("challenge_duration_hours"))
+    if deadline is not None:
+        now = datetime.now(timezone.utc)
+        if now > deadline:
+            deadline_line = f"⏰ Deadline was {format_deadline(deadline)} - claimed {format_timedelta(now - deadline)} late\n"
+        else:
+            deadline_line = (
+                f"⏰ Deadline: {format_deadline(deadline)} - {format_timedelta(deadline - now)} left when claimed\n"
+            )
+
     text = (
         f"🏆 *Claim submitted*\n"
         f"Email: {_md(row.get('Email Address'))}\n"
         f"Telegram: @{_md(row.get('TelegramUsername') or '-')}\n"
         f"Wallet: `{row.get('WalletAddress')}`\n"
+        f"{deadline_line}"
         f"{_repeat_participant_line(row)}\n"
         f"Go check their testnet account, then tap below."
     )

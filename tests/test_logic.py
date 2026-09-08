@@ -176,6 +176,7 @@ def test_claim_card_failure_rolls_back_the_status(monkeypatch):
     store = MagicMock()
     store.find_by_chat_id.return_value = {"_row": 9, "Funded": "TRUE", "ClaimStatus": ""}
     store.is_true.side_effect = lambda row, col: str(row.get(col, "")).strip().upper() == "TRUE"
+    store.get_config.return_value = {"challenge_duration_hours": "72"}
     context = MagicMock()
     context.bot_data = {"store": store, "mod_group_chat_id": -100}
     context.bot.send_message = AsyncMock(side_effect=RuntimeError("mod group unreachable"))
@@ -290,7 +291,7 @@ def test_mod_card_escapes_underscores_in_dynamic_fields():
     assert "@friend\\_one, @friend\\_two\\_x, @friend\\_3" in text
     assert "john_the_trader_99" not in text  # the raw, unescaped form must not appear
 
-    text2, _ = claim_requested_card(row)
+    text2, _ = claim_requested_card(row, {"challenge_duration_hours": "72"})
     assert "john\\_the\\_trader\\_99" in text2
     assert "john_the_trader_99" not in text2
 
@@ -492,3 +493,164 @@ def test_poll_backfills_funded_at_for_hand_ticked_rows(monkeypatch):
     assert (2, "FundedAt", fixed_now.isoformat()) in writes
     sent_text = context.bot.send_message.call_args.kwargs["text"]
     assert "{deadline}" not in sent_text
+
+
+def _make_command_update(chat_id):
+    update = MagicMock()
+    update.effective_chat.id = chat_id
+    update.message.reply_text = AsyncMock()
+    return update
+
+
+def test_claim_card_shows_time_left_when_claimed_before_deadline(monkeypatch):
+    from bot import mod_cards
+
+    fixed_now = datetime(2026, 9, 9, 12, 0, tzinfo=timezone.utc)  # 24h after funding
+
+    class _FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed_now
+
+    monkeypatch.setattr(mod_cards, "datetime", _FixedDatetime)
+
+    funded_at = datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc)
+    row = {
+        "_row": 5,
+        "Email Address": "a@x.com",
+        "TelegramUsername": "trader1",
+        "WalletAddress": "0x" + "a" * 40,
+        "FundedAt": funded_at.isoformat(),
+    }
+
+    text, _ = claim_requested_card(row, {"challenge_duration_hours": "72"})
+
+    assert "Deadline:" in text
+    assert "left when claimed" in text
+    assert "late" not in text
+
+
+def test_claim_card_shows_late_when_claimed_after_deadline(monkeypatch):
+    from bot import mod_cards
+
+    fixed_now = datetime(2026, 9, 12, 0, 0, tzinfo=timezone.utc)  # 12h past the 72h deadline
+
+    class _FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed_now
+
+    monkeypatch.setattr(mod_cards, "datetime", _FixedDatetime)
+
+    funded_at = datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc)
+    row = {
+        "_row": 5,
+        "Email Address": "a@x.com",
+        "TelegramUsername": "trader1",
+        "WalletAddress": "0x" + "a" * 40,
+        "FundedAt": funded_at.isoformat(),
+    }
+
+    text, _ = claim_requested_card(row, {"challenge_duration_hours": "72"})
+
+    assert "Deadline was" in text
+    assert "late" in text
+
+
+def test_check_command_outside_mod_group_does_nothing():
+    store = MagicMock()
+    context = MagicMock()
+    context.bot_data = {"store": store, "mod_group_chat_id": -100}
+    context.args = ["3"]
+    update = _make_command_update(555)  # not the mod group
+
+    asyncio.run(admin.check(update, context))
+
+    update.message.reply_text.assert_not_called()
+    store.find_by_row.assert_not_called()
+
+
+def test_check_command_requires_row_number():
+    store = MagicMock()
+    context = MagicMock()
+    context.bot_data = {"store": store, "mod_group_chat_id": -100}
+    context.args = []
+    update = _make_command_update(-100)
+
+    asyncio.run(admin.check(update, context))
+
+    update.message.reply_text.assert_awaited_once_with("Usage: /check <sheet_row_number>")
+
+
+def test_check_command_row_not_found():
+    store = MagicMock()
+    store.find_by_row.return_value = None
+    context = MagicMock()
+    context.bot_data = {"store": store, "mod_group_chat_id": -100}
+    context.args = ["99"]
+    update = _make_command_update(-100)
+
+    asyncio.run(admin.check(update, context))
+
+    update.message.reply_text.assert_awaited_once_with("Couldn't find that row - check the sheet.")
+
+
+def test_check_command_shows_deadline_for_funded_row(monkeypatch):
+    fixed_now = datetime(2026, 9, 9, 12, 0, tzinfo=timezone.utc)
+
+    class _FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed_now
+
+    monkeypatch.setattr(admin, "datetime", _FixedDatetime)
+
+    funded_at = datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc)
+    store = MagicMock()
+    store.find_by_row.return_value = {
+        "_row": 3,
+        "Email Address": "a@x.com",
+        "TelegramUsername": "trader1",
+        "Eligible": "TRUE",
+        "WalletAddress": "0x" + "a" * 40,
+        "Funded": "TRUE",
+        "FundedAt": funded_at.isoformat(),
+        "ClaimStatus": "",
+    }
+    store.is_true.side_effect = lambda row, col: str(row.get(col, "")).strip().upper() == "TRUE"
+    store.get_config.return_value = {"challenge_duration_hours": "72"}
+    context = MagicMock()
+    context.bot_data = {"store": store, "mod_group_chat_id": -100}
+    context.args = ["3"]
+    update = _make_command_update(-100)
+
+    asyncio.run(admin.check(update, context))
+
+    sent = update.message.reply_text.call_args[0][0]
+    assert "Deadline:" in sent
+    assert "left" in sent
+
+
+def test_check_command_omits_deadline_when_not_funded():
+    store = MagicMock()
+    store.find_by_row.return_value = {
+        "_row": 3,
+        "Email Address": "a@x.com",
+        "TelegramUsername": "trader1",
+        "Eligible": "TRUE",
+        "WalletAddress": "",
+        "Funded": "FALSE",
+        "FundedAt": "",
+        "ClaimStatus": "",
+    }
+    store.is_true.side_effect = lambda row, col: str(row.get(col, "")).strip().upper() == "TRUE"
+    context = MagicMock()
+    context.bot_data = {"store": store, "mod_group_chat_id": -100}
+    context.args = ["3"]
+    update = _make_command_update(-100)
+
+    asyncio.run(admin.check(update, context))
+
+    sent = update.message.reply_text.call_args[0][0]
+    assert "Deadline:" not in sent
+    store.get_config.assert_not_called()

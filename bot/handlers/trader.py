@@ -128,7 +128,8 @@ async def claim(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await asyncio.to_thread(store.update_cell, row["_row"], "ClaimStatus", "REQUESTED")
     row["ClaimStatus"] = "REQUESTED"
-    text, keyboard = claim_requested_card(row)
+    cfg = await asyncio.to_thread(store.get_config)
+    text, keyboard = claim_requested_card(row, cfg)
 
     if await _post_mod_card(context, text, keyboard):
         await update.message.reply_text(messages.CLAIM_RECEIVED)

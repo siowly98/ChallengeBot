@@ -171,17 +171,20 @@ up) - not on a fixed calendar date for everyone. That timestamp is
 recorded in `FundedAt`, and the deadline shown to the trader and on
 `/status` is just `FundedAt + Challenge Duration Hours`.
 
-This is display-only: the bot shows the deadline (in the funded message,
-in `/status`, and echoed onto the mod card when a mod taps Fund) but
-never blocks a late `/claim` - a mod still reviews and decides every
-claim, same as before. Funding someone on a Thursday, Friday, or a
-weekend day isn't blocked either; the mod card just gets a "⚠️ Funded
-Thu-Sun" note as a heads-up, since a 3-day window that starts Monday
-through Wednesday lands entirely on weekdays, and one starting later in
-the week starts pulling in weekend days. Whether that matters for your
-round is a call for mods, not something the bot enforces - if you want a
-hard rule (e.g. "only fund Mon-Wed"), that's a process rule for mods to
-follow, the same way repeat-entrant approval already is.
+This is display-only: the bot shows the deadline everywhere a mod or
+trader might need it - the funded message, `/status`, the mod card note
+when a mod taps Fund, the claim card when a trader submits `/claim` (with
+how early or late it was), and `/check` (below) - but never blocks a late
+`/claim` itself. A mod still reviews and decides every claim, same as
+before; the deadline is information for that decision, not an automatic
+verdict. Funding someone on a Thursday, Friday, or a weekend day isn't
+blocked either; the mod card just gets a "⚠️ Funded Thu-Sun" note as a
+heads-up, since a 3-day window that starts Monday through Wednesday lands
+entirely on weekdays, and one starting later in the week starts pulling
+in weekend days. Whether that matters for your round is a call for mods,
+not something the bot enforces - if you want a hard rule (e.g. "only fund
+Mon-Wed"), that's a process rule for mods to follow, the same way
+repeat-entrant approval already is.
 
 ## Deploying so it runs continuously
 
@@ -208,11 +211,18 @@ push + Railway redeploy.
 - `/invite <sheet_row_number> <invite_link>` - DMs a trader their private
   group invite link. The row number is visible on their card in this
   group.
+- `/check <sheet_row_number>` - read-only lookup of a trader's status and
+  challenge deadline without leaving the group or opening the sheet.
+  Doesn't change anything - use it to spot-check someone, or to double
+  check a claim's timing beyond what's already on the claim card.
 
 Trader-facing commands (`/start`, `/status`, `/claim`) and the plain-text
 email/wallet flow are deliberately disabled inside the mod group - a mod
 chatting normally in there won't get misread as a trader submitting an
-email or wallet address. Those only work in a 1:1 DM with the bot.
+email or wallet address (this is also why `/status` "doesn't work" if you
+try it in the mod group - it's disabled there on purpose; use `/check` in
+the group instead). Those trader commands only work in a 1:1 DM with the
+bot.
 
 ## Starting a new round
 
@@ -263,5 +273,5 @@ bot/
   main.py              # wires it all together, entry point
   handlers/
     trader.py          # /start, /status, /claim, and the email/wallet text flow
-    admin.py            # mod group button taps + /invite command
+    admin.py            # mod group button taps + /invite, /check commands
 ```

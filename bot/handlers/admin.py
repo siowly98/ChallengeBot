@@ -13,7 +13,7 @@ from telegram.ext import ContextTypes
 from telegram.helpers import escape_markdown
 
 from .. import messages
-from ..deadlines import compute_deadline, format_deadline, funded_late_in_week
+from ..deadlines import compute_deadline, format_deadline, format_timedelta, funded_late_in_week
 from ..sheets import SheetStore
 
 
@@ -118,3 +118,48 @@ async def invite(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text=messages.GROUP_INVITE.format(invite_link=invite_link),
     )
     await update.message.reply_text(f"Sent the invite link to {row.get('Email Address')}.")
+
+
+async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Usage (in the mod group): /check <sheet_row_number> - read-only
+    lookup of a trader's status and deadline without leaving the group or
+    opening the sheet. Doesn't change anything."""
+    if not _is_mod_group(update, context):
+        return
+
+    args = context.args
+    if len(args) < 1:
+        await update.message.reply_text("Usage: /check <sheet_row_number>")
+        return
+
+    store = get_store(context)
+    try:
+        row_number = int(args[0])
+    except ValueError:
+        await update.message.reply_text("Row number must be a number (see the card above).")
+        return
+
+    row = await asyncio.to_thread(store.find_by_row, row_number)
+    if row is None:
+        await update.message.reply_text("Couldn't find that row - check the sheet.")
+        return
+
+    lines = [
+        f"Row {row_number}: {row.get('Email Address') or '-'} (@{row.get('TelegramUsername') or '-'})",
+        f"Eligible: {'Yes' if store.is_true(row, 'Eligible') else 'No'}",
+        f"Wallet on file: {'Yes' if row.get('WalletAddress') else 'No'}",
+        f"Funded: {'Yes' if store.is_true(row, 'Funded') else 'No'}",
+    ]
+
+    if store.is_true(row, "Funded"):
+        cfg = await asyncio.to_thread(store.get_config)
+        deadline = compute_deadline(row.get("FundedAt"), cfg.get("challenge_duration_hours"))
+        if deadline is not None:
+            now = datetime.now(timezone.utc)
+            if now > deadline:
+                lines.append(f"Deadline: {format_deadline(deadline)} - passed {format_timedelta(now - deadline)} ago")
+            else:
+                lines.append(f"Deadline: {format_deadline(deadline)} - {format_timedelta(deadline - now)} left")
+
+    lines.append(f"Claim status: {row.get('ClaimStatus') or 'None submitted'}")
+    await update.message.reply_text("\n".join(lines))

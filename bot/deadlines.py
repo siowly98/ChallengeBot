@@ -49,3 +49,17 @@ def funded_late_in_week(funded_at: datetime) -> bool:
     """True if funding at this moment means the challenge window will
     likely include a weekend day - a heads-up for mods, never enforced."""
     return funded_at.weekday() >= _LATE_WEEKDAY_CUTOFF
+
+
+def format_timedelta(delta: timedelta) -> str:
+    """Compact human string for a small gap around a deadline, e.g. "4h 12m"
+    or "35m". Callers should only ever pass a non-negative delta (how early
+    or how late something was relative to the deadline) - this doesn't
+    handle calendar-scale spans or negative values meaningfully."""
+    total_minutes = max(int(delta.total_seconds() // 60), 0)
+    hours, minutes = divmod(total_minutes, 60)
+    if hours and minutes:
+        return f"{hours}h {minutes}m"
+    if hours:
+        return f"{hours}h"
+    return f"{minutes}m"
