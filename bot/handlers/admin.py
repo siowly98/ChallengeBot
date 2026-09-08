@@ -6,12 +6,14 @@ Everything here checks it's being used inside the configured mod group -
 these actions should never be reachable by a trader.
 """
 import asyncio
+from datetime import datetime, timezone
 
 from telegram import Update
 from telegram.ext import ContextTypes
 from telegram.helpers import escape_markdown
 
 from .. import messages
+from ..deadlines import compute_deadline, format_deadline, funded_late_in_week
 from ..sheets import SheetStore
 
 
@@ -42,12 +44,27 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if action == "fund":
         cfg = await asyncio.to_thread(store.get_config)
-        await asyncio.to_thread(store.update_cells, row["_row"], {"Funded": "TRUE", "GuideSent": "TRUE"})
+        # The challenge clock starts now, per participant - not on a shared
+        # Config date. FundedAt is what /status and the deadline shown below
+        # are computed from (see bot/deadlines.py).
+        funded_at = datetime.now(timezone.utc)
+        await asyncio.to_thread(
+            store.update_cells,
+            row["_row"],
+            {"Funded": "TRUE", "GuideSent": "TRUE", "FundedAt": funded_at.isoformat()},
+        )
+        deadline = compute_deadline(funded_at.isoformat(), cfg.get("challenge_duration_hours"))
+        deadline_str = format_deadline(deadline) if deadline else "the deadline"
         await context.bot.send_message(
             chat_id=int(row["ChatID"]),
-            text=messages.render(messages.FUNDED_AND_GUIDE, cfg),
+            text=messages.render(messages.FUNDED_AND_GUIDE, cfg, deadline=deadline_str),
         )
-        await query.edit_message_text(f"{query.message.text}\n\n✅ Funded by {mod_name}", parse_mode="Markdown")
+        note = f"\n\n✅ Funded by {mod_name} - ends {deadline_str}"
+        if funded_late_in_week(funded_at):
+            # Display-only nudge - mods still decide, nothing here blocks
+            # funding on a Thursday/Friday/weekend.
+            note += "\n⚠️ Funded Thu-Sun - this window will include a weekend day"
+        await query.edit_message_text(f"{query.message.text}{note}", parse_mode="Markdown")
 
     elif action == "verify":
         cfg = await asyncio.to_thread(store.get_config)

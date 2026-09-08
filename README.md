@@ -48,20 +48,23 @@ these column headers (order doesn't matter, spelling does):
 
 ```
 Timestamp | Email Address | TelegramUsername | ChatID | Eligible | ApprovalSent |
-WalletAddress | Funded | GuideSent | ClaimStatus | ClaimInstructionsSent | Notes
+WalletAddress | Funded | FundedAt | GuideSent | ClaimStatus | ClaimInstructionsSent | Notes
 ```
 
 If your Google Form responses already land in a sheet, just add the
 columns the bot manages (`TelegramUsername`, `ChatID`, `Eligible`,
-`ApprovalSent`, `WalletAddress`, `Funded`, `GuideSent`, `ClaimStatus`,
-`ClaimInstructionsSent`, `Notes`) to that same tab - `Timestamp` and
-`Email Address` should already be there from the Form. Note:
-`TelegramUsername` (bot-managed) is separate from any self-reported
+`ApprovalSent`, `WalletAddress`, `Funded`, `FundedAt`, `GuideSent`,
+`ClaimStatus`, `ClaimInstructionsSent`, `Notes`) to that same tab -
+`Timestamp` and `Email Address` should already be there from the Form.
+Note: `TelegramUsername` (bot-managed) is separate from any self-reported
 "Your Telegram @username" column your form already has - keep both.
 
 `Eligible` and `Funded` are the two columns a mod ticks by hand when
 reviewing (checkbox format works fine - the bot reads TRUE/FALSE/YES/1 as
-"true", anything else as "false"). Everything else the bot fills in itself.
+"true", anything else as "false"). Everything else the bot fills in itself,
+including `FundedAt` - see "Per-participant challenge deadline" below for
+what that drives. If you're adding this column to an existing sheet, the
+bot won't start until it's there (it checks the header row on startup).
 
 **Optional: letting someone repeat the challenge.** Add three questions to
 the Google Form itself (word them however reads best to applicants), and
@@ -137,8 +140,8 @@ each of these keys:
 
 | Key | Example value |
 | --- | --- |
-| `Challenge Start Date` | `Monday, August 31` |
 | `Challenge Duration` | `3 days` |
+| `Challenge Duration Hours` | `72` |
 | `Start Amount` | `$5,000` |
 | `Target Amount` | `$10,000` |
 | `Prize Amount` | `$100` |
@@ -152,6 +155,33 @@ If you leave the whole tab out, or leave a row blank, the bot just uses
 its built-in defaults for that value instead of breaking, so you can add
 this gradually. Changes take effect on the very next message the bot
 sends - no restart needed.
+
+`Challenge Duration` is just the wording used in trader-facing copy
+("3 days"). `Challenge Duration Hours` is the number the bot actually
+does deadline math with (`72`) - keep the two in sync by hand if you
+change the round length. There's no `Challenge Start Date` key anymore:
+see "Per-participant challenge deadline" below for why.
+
+### Per-participant challenge deadline
+
+The challenge clock is per participant, not shared. It starts the moment
+a mod taps **Mark Funded** on their card (or, if a mod ticks `Funded`
+directly in the sheet instead, the moment the poll loop next picks that
+up) - not on a fixed calendar date for everyone. That timestamp is
+recorded in `FundedAt`, and the deadline shown to the trader and on
+`/status` is just `FundedAt + Challenge Duration Hours`.
+
+This is display-only: the bot shows the deadline (in the funded message,
+in `/status`, and echoed onto the mod card when a mod taps Fund) but
+never blocks a late `/claim` - a mod still reviews and decides every
+claim, same as before. Funding someone on a Thursday, Friday, or a
+weekend day isn't blocked either; the mod card just gets a "⚠️ Funded
+Thu-Sun" note as a heads-up, since a 3-day window that starts Monday
+through Wednesday lands entirely on weekdays, and one starting later in
+the week starts pulling in weekend days. Whether that matters for your
+round is a call for mods, not something the bot enforces - if you want a
+hard rule (e.g. "only fund Mon-Wed"), that's a process rule for mods to
+follow, the same way repeat-entrant approval already is.
 
 ## Deploying so it runs continuously
 
@@ -200,7 +230,7 @@ Before opening the Form to a new round's applicants:
 2. Delete all the data rows in the live tab, keeping just the header row.
    `WORKSHEET_NAME` in `.env`/Railway doesn't need to change - the Form
    keeps writing to the same tab, which the bot now sees as empty.
-3. Update the Config tab's values for the new round (dates, amounts,
+3. Update the Config tab's values for the new round (duration, amounts,
    prize - see step 6 above).
 
 Consequence: everyone's `ChatID` gets wiped too, so every trader -

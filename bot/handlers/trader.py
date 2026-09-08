@@ -12,6 +12,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from .. import messages
+from ..deadlines import compute_deadline, format_deadline
 from ..mod_cards import claim_requested_card, wallet_submitted_card
 from ..sheets import SheetStore
 
@@ -90,11 +91,20 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if row is None:
         await update.message.reply_text(messages.STATUS_UNLINKED)
         return
+
+    deadline_line = ""
+    if store.is_true(row, "Funded") and row.get("FundedAt"):
+        cfg = await asyncio.to_thread(store.get_config)
+        deadline = compute_deadline(row.get("FundedAt"), cfg.get("challenge_duration_hours"))
+        if deadline is not None:
+            deadline_line = f"- Challenge ends: {format_deadline(deadline)}\n"
+
     await update.message.reply_text(
         messages.STATUS_TEMPLATE.format(
             eligible="Yes" if store.is_true(row, "Eligible") else "Not yet",
             has_wallet="Yes" if row.get("WalletAddress") else "No",
             funded="Yes" if store.is_true(row, "Funded") else "No",
+            deadline_line=deadline_line,
             claim_status=row.get("ClaimStatus") or "None submitted",
         )
     )

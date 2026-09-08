@@ -1,12 +1,19 @@
 """All trader-facing copy lives here so non-engineers can edit wording
 without touching handler logic. Keep it plain - see ELI5 note in README.
 
-Challenge settings (dates, amounts, prize, links) are NOT hardcoded here.
-They live in the "Config" tab of the Google Sheet, so changing them each
-round is just editing spreadsheet cells - no code, no git, no redeploy.
-See bot/config.py for the full list of keys and bot/sheets.py's
+Challenge settings (duration, amounts, prize, links) are NOT hardcoded
+here. They live in the "Config" tab of the Google Sheet, so changing them
+each round is just editing spreadsheet cells - no code, no git, no
+redeploy. See bot/config.py for the full list of keys and bot/sheets.py's
 get_config() for how they're read. Any template below with a {placeholder}
-like {prize_amount} gets it filled in from that sheet via render()."""
+like {prize_amount} gets it filled in from that sheet via render().
+
+One exception: {deadline} in FUNDED_AND_GUIDE isn't a Config value - it's
+computed per participant from their own FundedAt timestamp (see
+bot/deadlines.py), since the challenge clock starts when THEY get funded,
+not on a shared date. It's passed in as a render() extra by whichever
+handler sends that message (the Fund button in admin.py, or the poll
+loop in jobs.py for hand-ticked rows)."""
 
 # Where to send someone who needs a human - linked from every message that
 # tells a trader to "message a mod".
@@ -84,8 +91,9 @@ WALLET_GUIDE = (
 
 APPROVAL_AND_WALLET_REQUEST = (
     "Gmgm 👋 You've been selected for the Avantis {start_amount} → {target_amount} Challenge! 🎉\n\n"
-    "The challenge starts {challenge_start_date}. You'll get {start_amount} in practice funds and have "
-    "{challenge_duration} to reach {target_amount}+ and win {prize_amount}. Trade any asset, any leverage.\n\n"
+    "Your {challenge_duration} clock starts the moment we fund your wallet, not before - so there's no rush "
+    "right now. You'll get {start_amount} in practice funds and have to reach {target_amount}+ to win "
+    "{prize_amount}. Trade any asset, any leverage.\n\n"
     + WALLET_GUIDE
 )
 
@@ -120,7 +128,7 @@ FUNDED_AND_GUIDE = (
     "{start_amount} USDC is in! 🐆🔥\n\n"
     "You're officially live in the {challenge_duration} {start_amount} → {target_amount} Challenge from "
     "this exact moment. ⏱️\n\n"
-    "Reach a {target_amount}+ balance before time's up and win {prize_amount}. LFG! 🚀\n\n"
+    "Reach a {target_amount}+ balance before {deadline} and win {prize_amount}. LFG! 🚀\n\n"
     "Read the full rules and details here:\n{guide_link}\n\n"
     "When you think you've hit the target, come back here and send /claim.\n\n"
     "Also - if you want to share your challenge journey on social media, send us the link, we'd love to "
@@ -169,5 +177,6 @@ STATUS_TEMPLATE = (
     "- Approved: {eligible}\n"
     "- Wallet on file: {has_wallet}\n"
     "- Funded: {funded}\n"
+    "{deadline_line}"
     "- Claim status: {claim_status}\n"
 )

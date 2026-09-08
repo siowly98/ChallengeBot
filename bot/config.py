@@ -28,8 +28,11 @@ CONFIG_WORKSHEET_NAME = os.environ.get("CONFIG_WORKSHEET_NAME", "Config")
 # yet at all - the bot falls back to these instead of crashing, so it's safe
 # to add the tab gradually.
 CONFIG_DEFAULTS = {
-    "challenge_start_date": "Monday, August 31",
     "challenge_duration": "3 days",
+    # Numeric twin of challenge_duration, used for actual deadline math
+    # (FundedAt + this many hours) - see bot/deadlines.py. Keep this in
+    # sync with challenge_duration by hand (e.g. "3 days" -> "72").
+    "challenge_duration_hours": "72",
     "start_amount": "$5,000",
     "target_amount": "$10,000",
     "prize_amount": "$100",
@@ -49,6 +52,7 @@ COLUMNS = [
     "ApprovalSent",
     "WalletAddress",
     "Funded",
+    "FundedAt",         # ISO UTC timestamp, written when a mod clicks Fund - the challenge clock starts here
     "GuideSent",
     "ClaimStatus",       # "", "REQUESTED", "VERIFIED", "REJECTED"
     "ClaimInstructionsSent",
