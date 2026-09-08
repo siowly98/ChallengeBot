@@ -1,6 +1,14 @@
 """All trader-facing copy lives here so non-engineers can edit wording
 without touching handler logic. Keep it plain — see ELI5 note in README."""
 
+# ── Challenge settings — edit these each round, nothing else needs to change ──
+CHALLENGE_START_DATE = "Monday, August 31"   # e.g. "Monday, August 31"
+CHALLENGE_DURATION = "3 days"                # e.g. "3 days" — the clock starts at funding
+START_AMOUNT = "$5,000"
+TARGET_AMOUNT = "$10,000"
+PRIZE_AMOUNT = "$100"
+WALLET_SITE_URL = "testnet.avantisfi.com"    # where traders log in to get their testnet wallet
+
 WELCOME = (
     "Welcome to the Avantis Challenge bot! 👋\n\n"
     "This is how we'll reach you with updates about your application — approval, "
@@ -35,8 +43,17 @@ LINK_SUCCESS_NOT_YET_REVIEWED = (
 )
 
 APPROVAL_AND_WALLET_REQUEST = (
-    "Good news — you've been approved for the Avantis Challenge!\n\n"
-    "Reply here with your wallet address so we can send your $5,000 testnet USDC."
+    f"Gmgm 👋 You've been selected for the Avantis {START_AMOUNT} → {TARGET_AMOUNT} Challenge! 🎉\n\n"
+    f"The challenge starts {CHALLENGE_START_DATE}. You'll get {START_AMOUNT} in practice funds and have "
+    f"{CHALLENGE_DURATION} to reach {TARGET_AMOUNT}+ and win {PRIZE_AMOUNT}. Trade any asset, any leverage.\n\n"
+    "⚠️ First step — send us your wallet address:\n\n"
+    f"1. Go to {WALLET_SITE_URL}\n"
+    "2. Log in using the same method you used when applying — Google, email, or phone.\n"
+    "3. Your wallet is created automatically.\n"
+    "4. Click your wallet/address in the top-right corner and copy the full address starting with \"0x\".\n"
+    "5. Send that full address here.\n\n"
+    "⚠️ When you trade, always log back in using that same method/account — otherwise you may end up "
+    "trading from a different wallet than the one we fund."
 )
 
 WALLET_RECEIVED = (
@@ -50,9 +67,14 @@ INVALID_WALLET_FORMAT = (
 )
 
 FUNDED_AND_GUIDE = (
-    "You're funded! $5,000 testnet USDC has been sent to your wallet.\n\n"
-    "Here's your setup guide:\n{guide_link}\n\n"
-    "Goal: turn $5,000 into $10,000. When you think you've done it, come back here and send /claim."
+    f"{START_AMOUNT} USDC is in! 🐆🔥\n\n"
+    f"You're officially live in the {CHALLENGE_DURATION} {START_AMOUNT} → {TARGET_AMOUNT} Challenge from "
+    "this exact moment. ⏱️\n\n"
+    f"Reach a {TARGET_AMOUNT}+ balance before time's up and win {PRIZE_AMOUNT}. LFG! 🚀\n\n"
+    "Setup guide, in case you need it:\n{guide_link}\n\n"
+    "When you think you've hit the target, come back here and send /claim.\n\n"
+    "Also — if you want to share your challenge journey on social media, send us the link, we'd love to "
+    "support and amplify it! 🫡"
 )
 
 CLAIM_NOT_ELIGIBLE = (
@@ -70,7 +92,7 @@ CLAIM_ALREADY_SUBMITTED = (
 )
 
 CLAIM_VERIFIED = (
-    "Confirmed — you did it! Here's how to claim your $100 prize:\n{claim_instructions}"
+    f"Confirmed — you did it! Here's how to claim your {PRIZE_AMOUNT} prize:\n" + "{claim_instructions}"
 )
 
 CLAIM_REJECTED = (
