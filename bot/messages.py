@@ -54,6 +54,7 @@ HELP = (
     "Here's what I can do:\n\n"
     "/start - link your Telegram to your application (do this first)\n"
     "/status - check where you're at in the process\n"
+    "/wallet - show the steps to get your testnet wallet address again\n"
     "/claim - tell us you've completed the challenge (only works once you're funded)\n"
     "/help - show this message\n\n"
     "Once you're linked, you don't need to do anything else - we'll message you here "
@@ -66,11 +67,12 @@ LINK_SUCCESS_NOT_YET_REVIEWED = (
     "We'll message you here as soon as there's an update. No need to do anything else for now."
 )
 
-APPROVAL_AND_WALLET_REQUEST = (
-    "Gmgm 👋 You've been selected for the Avantis {start_amount} → {target_amount} Challenge! 🎉\n\n"
-    "The challenge starts {challenge_start_date}. You'll get {start_amount} in practice funds and have "
-    "{challenge_duration} to reach {target_amount}+ and win {prize_amount}. Trade any asset, any leverage.\n\n"
-    "⚠️ First step - send us your wallet address:\n\n"
+# The wallet-acquisition steps, kept on their own so they can be re-sent via
+# /wallet (or when a waiting trader types a question instead of an address)
+# without repeating the "you've been selected" preamble each time. Written to
+# read correctly both standalone and appended after the approval preamble.
+WALLET_GUIDE = (
+    "⚠️ Send us your wallet address. Here's how to get it:\n\n"
     "1. Go to {wallet_site_url}\n"
     "2. Log in using the same method you used when applying - Google, email, or phone.\n"
     "3. Your wallet is created automatically.\n"
@@ -78,6 +80,24 @@ APPROVAL_AND_WALLET_REQUEST = (
     "5. Send that full address here.\n\n"
     "⚠️ When you trade, always log back in using that same method/account - otherwise you may end up "
     "trading from a different wallet than the one we fund."
+)
+
+APPROVAL_AND_WALLET_REQUEST = (
+    "Gmgm 👋 You've been selected for the Avantis {start_amount} → {target_amount} Challenge! 🎉\n\n"
+    "The challenge starts {challenge_start_date}. You'll get {start_amount} in practice funds and have "
+    "{challenge_duration} to reach {target_amount}+ and win {prize_amount}. Trade any asset, any leverage.\n\n"
+    + WALLET_GUIDE
+)
+
+WALLET_NOT_APPROVED_YET = (
+    "You're linked, but you haven't been approved for this round yet - so there's no wallet to submit "
+    "just yet. We'll message you here the moment you're selected, with the steps to get your wallet. "
+    "Send /status anytime to check where you're at."
+)
+
+WALLET_ALREADY_ON_FILE = (
+    "We've already got your wallet address on file - nothing more to do on your end. "
+    "Send /status to check where you're at."
 )
 
 WALLET_RECEIVED = (

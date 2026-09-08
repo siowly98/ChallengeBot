@@ -64,6 +64,26 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(messages.HELP)
 
 
+async def wallet_guide(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/wallet - re-send the "how to get your testnet wallet" steps. Once a
+    trader is linked, the guide was only ever sent once (at approval), with
+    no way to see it again short of scrolling. This gives them that on
+    demand, and only when it's actually relevant to their state."""
+    store = get_store(context)
+    row = await asyncio.to_thread(store.find_by_chat_id, update.effective_chat.id)
+    if row is None:
+        await update.message.reply_text(messages.STATUS_UNLINKED)
+        return
+    if not (store.is_true(row, "Eligible") and store.is_true(row, "ApprovalSent")):
+        await update.message.reply_text(messages.WALLET_NOT_APPROVED_YET)
+        return
+    if row.get("WalletAddress"):
+        await update.message.reply_text(messages.WALLET_ALREADY_ON_FILE)
+        return
+    cfg = await asyncio.to_thread(store.get_config)
+    await update.message.reply_text(messages.render(messages.WALLET_GUIDE, cfg))
+
+
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     store = get_store(context)
     row = await asyncio.to_thread(store.find_by_chat_id, update.effective_chat.id)
@@ -157,7 +177,17 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     if awaiting_wallet:
         if not WALLET_RE.match(text):
-            await update.message.reply_text(messages.INVALID_WALLET_FORMAT)
+            # Distinguish a botched address from a confused user: if it
+            # starts with "0x" they clearly tried to paste an address, so
+            # keep the terse "that's not valid" nudge. Anything else (a
+            # question, "how do i get my wallet", "help") gets the full
+            # guide re-sent - which is how a linked trader re-prompts it
+            # without needing to know the /wallet command exists.
+            if text.lower().startswith("0x"):
+                await update.message.reply_text(messages.INVALID_WALLET_FORMAT)
+            else:
+                cfg = await asyncio.to_thread(store.get_config)
+                await update.message.reply_text(messages.render(messages.WALLET_GUIDE, cfg))
             return
 
         existing = await asyncio.to_thread(store.find_by_wallet, text)

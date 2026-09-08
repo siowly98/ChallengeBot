@@ -97,6 +97,7 @@ def main():
     app.add_handler(CommandHandler("start", trader.start, filters=not_mod_group))
     app.add_handler(CommandHandler("help", trader.help_command, filters=not_mod_group))
     app.add_handler(CommandHandler("status", trader.status, filters=not_mod_group))
+    app.add_handler(CommandHandler("wallet", trader.wallet_guide, filters=not_mod_group))
     app.add_handler(CommandHandler("claim", trader.claim, filters=not_mod_group))
     app.add_handler(CommandHandler("invite", admin.invite))
     app.add_handler(CallbackQueryHandler(admin.handle_button))
