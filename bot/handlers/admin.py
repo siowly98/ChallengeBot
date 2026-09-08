@@ -9,6 +9,7 @@ import asyncio
 
 from telegram import Update
 from telegram.ext import ContextTypes
+from telegram.helpers import escape_markdown
 
 from .. import messages
 from ..sheets import SheetStore
@@ -35,7 +36,9 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer("Couldn't find that row anymore - check the sheet.", show_alert=True)
         return
 
-    mod_name = query.from_user.first_name
+    # A mod's Telegram display name is just as unescaped/arbitrary as a
+    # trader's - same Markdown-breaks-on-underscore risk applies here too.
+    mod_name = escape_markdown(query.from_user.first_name or "a mod", version=1)
 
     if action == "fund":
         cfg = await asyncio.to_thread(store.get_config)
