@@ -152,7 +152,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Not linked yet -> treat this message as their application email.
         match = await asyncio.to_thread(store.find_by_email, text)
         if match is None:
-            await update.message.reply_text(messages.EMAIL_NOT_FOUND)
+            cfg = await asyncio.to_thread(store.get_config)
+            await update.message.reply_text(messages.render(messages.EMAIL_NOT_FOUND, cfg))
             return
 
         existing_chat_id = str(match.get("ChatID") or "").strip()

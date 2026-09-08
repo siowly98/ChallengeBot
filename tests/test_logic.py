@@ -97,6 +97,26 @@ def test_duplicate_email_is_blocked():
     store.update_cells.assert_not_called()
 
 
+def test_unknown_email_gets_the_form_link():
+    """Covers a new user who messages the bot before ever filling out the
+    application - the email lookup fails the same way it would for a typo,
+    so the reply has to cover both cases, including a way to actually
+    apply."""
+    store = MagicMock()
+    store.find_by_chat_id.return_value = None
+    store.find_by_email.return_value = None
+    store.get_config.return_value = {"google_form_link": "https://forms.example.com/challenge"}
+    context = MagicMock()
+    context.bot_data = {"store": store}
+    update = _make_update(111111, "notonlist@x.com")
+
+    asyncio.run(trader.handle_text(update, context))
+
+    sent = update.message.reply_text.call_args[0][0]
+    assert "https://forms.example.com/challenge" in sent
+    assert "Double check" in sent  # still covers the typo case too
+
+
 def test_duplicate_wallet_is_blocked():
     """The same wallet address can't be reused across two different rows."""
     store = MagicMock()

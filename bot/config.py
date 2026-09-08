@@ -39,6 +39,10 @@ CONFIG_DEFAULTS = {
     "wallet_site_url": "testnet.avantisfi.com",
     "guide_link": "https://your-doc-link-here/setup-guide",
     "claim_instructions_link": "https://your-doc-link-here/claim-instructions",
+    # Shown when someone messages the bot with an email that's not in the
+    # Applicants sheet - covers the case where they found the bot before
+    # ever filling out the application (see EMAIL_NOT_FOUND in messages.py).
+    "google_form_link": "https://your-form-link-here",
 }
 
 # Column layout in the worksheet. Row 1 must be a header row with exactly

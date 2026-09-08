@@ -38,7 +38,10 @@ ALREADY_LINKED = "You're already linked. Send /status to check where you're at, 
 
 EMAIL_NOT_FOUND = (
     "We couldn't find that email in our applicant list.\n\n"
-    "Double check it's typed exactly as you put it on the form (no extra spaces, "
+    "Haven't applied yet? You need to fill out the Challenge form first - we only link accounts that are "
+    "already on the list:\n{google_form_link}\n\n"
+    "Once you've submitted it, come back and send your email here again.\n\n"
+    "Already applied? Double check it's typed exactly as you put it on the form (no extra spaces, "
     "correct capitalization isn't required but spelling is) and send it again.\n\n"
     f"Still stuck after a couple tries? Message a mod directly for help: {CONTACT_LINK}"
 )

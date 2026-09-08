@@ -148,6 +148,7 @@ each of these keys:
 | `Wallet Site URL` | `testnet.avantisfi.com` |
 | `Guide Link` | link to your setup guide |
 | `Claim Instructions Link` | link to your prize-claim instructions |
+| `Google Form Link` | link to the Challenge application form |
 
 Key names aren't case-sensitive and ignore spacing (`Prize Amount`,
 `prize amount`, and `PRIZE_AMOUNT` all work) - use whatever's readable.
@@ -155,6 +156,12 @@ If you leave the whole tab out, or leave a row blank, the bot just uses
 its built-in defaults for that value instead of breaking, so you can add
 this gradually. Changes take effect on the very next message the bot
 sends - no restart needed.
+
+`Google Form Link` is shown when someone messages the bot an email that
+isn't on the Applicants sheet - covers someone who found the bot before
+ever filling out the form (as opposed to someone who already applied and
+just mistyped their email; the bot can't tell those two cases apart, so
+the message covers both).
 
 `Challenge Duration` is just the wording used in trader-facing copy
 ("3 days"). `Challenge Duration Hours` is the number the bot actually
