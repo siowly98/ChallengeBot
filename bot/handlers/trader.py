@@ -4,6 +4,7 @@ every path that matters (approval, funding, win verification) either waits
 for a mod to act on a card, or reflects a decision a mod already made in
 the sheet.
 """
+import asyncio
 import re
 
 from telegram import Update
@@ -22,7 +23,7 @@ def get_store(context: ContextTypes.DEFAULT_TYPE) -> SheetStore:
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     store = get_store(context)
-    row = store.find_by_chat_id(update.effective_chat.id)
+    row = await asyncio.to_thread(store.find_by_chat_id, update.effective_chat.id)
     if row is not None:
         await update.message.reply_text(messages.ALREADY_LINKED)
         return
@@ -35,7 +36,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     store = get_store(context)
-    row = store.find_by_chat_id(update.effective_chat.id)
+    row = await asyncio.to_thread(store.find_by_chat_id, update.effective_chat.id)
     if row is None:
         await update.message.reply_text(messages.STATUS_UNLINKED)
         return
@@ -51,7 +52,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def claim(update: Update, context: ContextTypes.DEFAULT_TYPE):
     store = get_store(context)
-    row = store.find_by_chat_id(update.effective_chat.id)
+    row = await asyncio.to_thread(store.find_by_chat_id, update.effective_chat.id)
     if row is None:
         await update.message.reply_text(messages.STATUS_UNLINKED)
         return
@@ -65,7 +66,7 @@ async def claim(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("You're already verified — check earlier messages for your claim steps.")
         return
 
-    store.update_cell(row["_row"], "ClaimStatus", "REQUESTED")
+    await asyncio.to_thread(store.update_cell, row["_row"], "ClaimStatus", "REQUESTED")
     await update.message.reply_text(messages.CLAIM_RECEIVED)
 
     row["ClaimStatus"] = "REQUESTED"
@@ -84,22 +85,27 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     store = get_store(context)
     chat_id = update.effective_chat.id
     text = (update.message.text or "").strip()
-    row = store.find_by_chat_id(chat_id)
+    row = await asyncio.to_thread(store.find_by_chat_id, chat_id)
 
     if row is None:
         # Not linked yet -> treat this message as their application email.
-        match = store.find_by_email(text)
+        match = await asyncio.to_thread(store.find_by_email, text)
         if match is None:
             await update.message.reply_text(messages.EMAIL_NOT_FOUND)
             return
 
-        store.update_cell(match["_row"], "ChatID", str(chat_id))
+        # Link ChatID + username, and (if already eligible) ApprovalSent -
+        # all decided before touching the network, then written in one
+        # batched call instead of up to three separate round trips.
         username = update.effective_user.username or ""
-        store.update_cell(match["_row"], "TelegramUsername", username)
+        updates = {"ChatID": str(chat_id), "TelegramUsername": username}
+        eligible = store.is_true(match, "Eligible")
+        if eligible:
+            updates["ApprovalSent"] = "TRUE"
+        await asyncio.to_thread(store.update_cells, match["_row"], updates)
 
-        if store.is_true(match, "Eligible"):
-            store.update_cell(match["_row"], "ApprovalSent", "TRUE")
-            cfg = store.get_config()
+        if eligible:
+            cfg = await asyncio.to_thread(store.get_config)
             await update.message.reply_text(messages.render(messages.APPROVAL_AND_WALLET_REQUEST, cfg))
         else:
             await update.message.reply_text(messages.LINK_SUCCESS_NOT_YET_REVIEWED)
@@ -114,7 +120,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not WALLET_RE.match(text):
             await update.message.reply_text(messages.INVALID_WALLET_FORMAT)
             return
-        store.update_cell(row["_row"], "WalletAddress", text)
+        await asyncio.to_thread(store.update_cell, row["_row"], "WalletAddress", text)
         await update.message.reply_text(messages.WALLET_RECEIVED)
 
         row["WalletAddress"] = text

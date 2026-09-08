@@ -5,6 +5,8 @@ bot instead of hunting the trader down themselves.
 Everything here checks it's being used inside the configured mod group -
 these actions should never be reachable by a trader.
 """
+import asyncio
+
 from telegram import Update
 from telegram.ext import ContextTypes
 
@@ -28,7 +30,7 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     store = get_store(context)
     action, row_str = query.data.split(":")
-    row = store.find_by_row(int(row_str))
+    row = await asyncio.to_thread(store.find_by_row, int(row_str))
     if row is None:
         await query.answer("Couldn't find that row anymore - check the sheet.", show_alert=True)
         return
@@ -36,9 +38,8 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mod_name = query.from_user.first_name
 
     if action == "fund":
-        cfg = store.get_config()
-        store.update_cell(row["_row"], "Funded", "TRUE")
-        store.update_cell(row["_row"], "GuideSent", "TRUE")
+        cfg = await asyncio.to_thread(store.get_config)
+        await asyncio.to_thread(store.update_cells, row["_row"], {"Funded": "TRUE", "GuideSent": "TRUE"})
         await context.bot.send_message(
             chat_id=int(row["ChatID"]),
             text=messages.render(messages.FUNDED_AND_GUIDE, cfg),
@@ -46,9 +47,10 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(f"{query.message.text}\n\n✅ Funded by {mod_name}", parse_mode="Markdown")
 
     elif action == "verify":
-        cfg = store.get_config()
-        store.update_cell(row["_row"], "ClaimStatus", "VERIFIED")
-        store.update_cell(row["_row"], "ClaimInstructionsSent", "TRUE")
+        cfg = await asyncio.to_thread(store.get_config)
+        await asyncio.to_thread(
+            store.update_cells, row["_row"], {"ClaimStatus": "VERIFIED", "ClaimInstructionsSent": "TRUE"}
+        )
         await context.bot.send_message(
             chat_id=int(row["ChatID"]),
             text=messages.render(messages.CLAIM_VERIFIED, cfg),
@@ -56,7 +58,7 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(f"{query.message.text}\n\n✅ Verified by {mod_name}", parse_mode="Markdown")
 
     elif action == "reject":
-        store.update_cell(row["_row"], "ClaimStatus", "REJECTED")
+        await asyncio.to_thread(store.update_cell, row["_row"], "ClaimStatus", "REJECTED")
         await context.bot.send_message(
             chat_id=int(row["ChatID"]),
             text=messages.CLAIM_REJECTED.format(reason="Message a mod if you have questions."),
@@ -84,7 +86,7 @@ async def invite(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     invite_link = args[1]
-    row = store.find_by_row(row_number)
+    row = await asyncio.to_thread(store.find_by_row, row_number)
     if row is None or not row.get("ChatID"):
         await update.message.reply_text("Couldn't find that row, or that trader hasn't linked their Telegram yet.")
         return

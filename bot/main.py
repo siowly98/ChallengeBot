@@ -20,6 +20,22 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 logger = logging.getLogger(__name__)
 
 
+async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
+    """Catches anything an handler raised (a Sheets API error/rate limit,
+    a bug, whatever) so it turns into a visible log line plus a plain
+    message to whoever sent the update, instead of the bot just staying
+    silent and looking broken/unresponsive."""
+    logger.exception("Unhandled error while processing update: %s", update, exc_info=context.error)
+    if isinstance(update, Update) and update.effective_message:
+        try:
+            await update.effective_message.reply_text(
+                "Something went wrong on our end — please try again in a moment. "
+                "If it keeps happening, message a mod."
+            )
+        except Exception:
+            logger.exception("Failed to notify user about the earlier error")
+
+
 async def _log_incoming_chat_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Diagnostic only - runs before every other handler and logs which chat
     an update came from. Use this to confirm the real MOD_GROUP_CHAT_ID:
@@ -43,9 +59,14 @@ async def _log_incoming_chat_id(update: Update, context: ContextTypes.DEFAULT_TY
 def main():
     store = SheetStore()
 
-    app = Application.builder().token(config.BOT_TOKEN).build()
+    # concurrent_updates lets the bot handle multiple people's messages at
+    # once instead of processing them one at a time - without this, one
+    # slow Sheets API call would hold up every other user's message behind
+    # it, which is the main reason things felt slow under any real load.
+    app = Application.builder().token(config.BOT_TOKEN).concurrent_updates(True).build()
     app.bot_data["store"] = store
     app.bot_data["mod_group_chat_id"] = config.MOD_GROUP_CHAT_ID
+    app.add_error_handler(on_error)
 
     # Runs before everything else, in its own group, so it never blocks the
     # real handlers - see _log_incoming_chat_id's docstring.

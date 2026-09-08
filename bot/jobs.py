@@ -4,6 +4,7 @@ edits the sheet directly instead (e.g. ticking Eligible=TRUE by hand while
 reviewing the raw form responses) - it catches that within
 POLL_INTERVAL_SECONDS and sends the message the bot would've sent anyway.
 """
+import asyncio
 import logging
 
 from telegram.ext import ContextTypes
@@ -16,8 +17,8 @@ logger = logging.getLogger(__name__)
 async def poll_sheet(context: ContextTypes.DEFAULT_TYPE):
     store = context.bot_data["store"]
     try:
-        rows = store.all_rows()
-        cfg = store.get_config()
+        rows = await asyncio.to_thread(store.all_rows)
+        cfg = await asyncio.to_thread(store.get_config)
     except Exception:
         logger.exception("Failed to read sheet during poll")
         return
@@ -32,13 +33,13 @@ async def poll_sheet(context: ContextTypes.DEFAULT_TYPE):
                 await context.bot.send_message(
                     chat_id=int(chat_id), text=messages.render(messages.APPROVAL_AND_WALLET_REQUEST, cfg)
                 )
-                store.update_cell(row["_row"], "ApprovalSent", "TRUE")
+                await asyncio.to_thread(store.update_cell, row["_row"], "ApprovalSent", "TRUE")
 
             if store.is_true(row, "Funded") and not store.is_true(row, "GuideSent"):
                 await context.bot.send_message(
                     chat_id=int(chat_id),
                     text=messages.render(messages.FUNDED_AND_GUIDE, cfg),
                 )
-                store.update_cell(row["_row"], "GuideSent", "TRUE")
+                await asyncio.to_thread(store.update_cell, row["_row"], "GuideSent", "TRUE")
         except Exception:
             logger.exception("Failed processing row %s during poll", row.get("_row"))
