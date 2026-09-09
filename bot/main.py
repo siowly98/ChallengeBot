@@ -101,7 +101,11 @@ def main():
     app.add_handler(CommandHandler("claim", trader.claim, filters=not_mod_group))
     app.add_handler(CommandHandler("invite", admin.invite))
     app.add_handler(CommandHandler("check", admin.check))
-    app.add_handler(CallbackQueryHandler(admin.handle_button))
+    # Patterns keep these two callback handlers from ever seeing each
+    # other's taps - mod-group card buttons (fund/verify/reject) vs. a
+    # trader's own claim-confirmation prompt (claimconfirm/claimcancel).
+    app.add_handler(CallbackQueryHandler(admin.handle_button, pattern=r"^(fund|verify|reject):"))
+    app.add_handler(CallbackQueryHandler(trader.handle_claim_confirmation, pattern=r"^claim(confirm|cancel):"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & not_mod_group, trader.handle_text))
 
     app.job_queue.run_repeating(poll_sheet, interval=config.POLL_INTERVAL_SECONDS, first=10)

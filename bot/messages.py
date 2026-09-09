@@ -152,6 +152,16 @@ CLAIM_TOO_SOON = (
     "Try /claim again in {wait} or once you've genuinely hit the target, whichever's later."
 )
 
+CLAIM_CONFIRM_PROMPT = (
+    "⚠️ Before you confirm - read this.\n\n"
+    "A mod checks every claim against your actual account. If you claim without genuinely "
+    "reaching {target_amount}, or after your account's already been liquidated, you'll be "
+    "blacklisted immediately - no warnings, no second chances.\n\n"
+    "Only tap Confirm if you're sure you've actually hit the target and still hold the balance."
+)
+
+CLAIM_CANCELLED = "Claim cancelled. Come back with /claim once you've actually hit the target."
+
 CLAIM_RECEIVED = (
     "Claim received! We're manually checking your account now - this isn't instant, "
     "we'll message you here once it's confirmed."

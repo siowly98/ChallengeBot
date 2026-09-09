@@ -260,9 +260,72 @@ def test_wallet_card_failure_rolls_back_the_write(monkeypatch):
     assert writes[-1] == (7, "WalletAddress", "")  # rollback is the last write
 
 
-def test_claim_card_failure_rolls_back_the_status(monkeypatch):
-    """Same guarantee for /claim: a failed card send rolls ClaimStatus back
-    to '' so the trader can send /claim again."""
+def test_claim_prompts_for_confirmation_instead_of_submitting_directly(monkeypatch):
+    """/claim no longer writes anything or posts a mod card by itself -
+    too many claims were coming in from people who'd been spamming /claim
+    without hitting the target, some after getting liquidated. It now
+    stops at a confirmation prompt with a blacklist warning; the actual
+    submission only happens if they tap Confirm (see
+    handle_claim_confirmation tests below)."""
+    fixed_now = datetime(2026, 9, 8, 12, 20, tzinfo=timezone.utc)  # past the min delay
+
+    class _FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed_now
+
+    monkeypatch.setattr(trader, "datetime", _FixedDatetime)
+
+    funded_at = datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc)
+    store = MagicMock()
+    store.find_by_chat_id.return_value = {
+        "_row": 9,
+        "ChatID": "444444",
+        "Funded": "TRUE",
+        "FundedAt": funded_at.isoformat(),
+        "ClaimStatus": "",
+    }
+    store.is_true.side_effect = lambda row, col: str(row.get(col, "")).strip().upper() == "TRUE"
+    store.get_config.return_value = {"min_claim_delay_minutes": "15", "target_amount": "$10,000"}
+    context = MagicMock()
+    context.bot_data = {"store": store, "mod_group_chat_id": -100}
+    context.bot.send_message = AsyncMock()
+    update = _make_update(444444, "/claim")
+
+    asyncio.run(trader.claim(update, context))
+
+    store.update_cell.assert_not_called()
+    context.bot.send_message.assert_not_called()  # no mod card yet
+    call = update.message.reply_text.call_args
+    assert "blacklisted" in call.args[0].lower()
+    keyboard = call.kwargs["reply_markup"]
+    buttons = keyboard.inline_keyboard[0]
+    assert buttons[0].callback_data == "claimconfirm:444444"
+    assert buttons[1].callback_data == "claimcancel:444444"
+
+
+def test_claim_confirmation_posts_the_card(monkeypatch):
+    """Tapping Confirm on the prompt is what actually writes ClaimStatus
+    and posts the mod card - the part /claim itself used to do directly."""
+    store = MagicMock()
+    store.find_by_chat_id.return_value = {"_row": 9, "ChatID": "444444", "Funded": "TRUE", "ClaimStatus": ""}
+    store.is_true.side_effect = lambda row, col: str(row.get(col, "")).strip().upper() == "TRUE"
+    store.get_config.return_value = {"challenge_duration_hours": "72"}
+    context = MagicMock()
+    context.bot_data = {"store": store, "mod_group_chat_id": -100}
+    context.bot.send_message = AsyncMock()
+    update, query = _make_callback_update(444444, "claimconfirm:444444")
+
+    asyncio.run(trader.handle_claim_confirmation(update, context))
+
+    store.update_cell.assert_called_once_with(9, "ClaimStatus", "REQUESTED")
+    context.bot.send_message.assert_awaited_once()
+    query.edit_message_text.assert_awaited_once_with(messages.CLAIM_RECEIVED)
+
+
+def test_claim_confirmation_card_failure_rolls_back_the_status(monkeypatch):
+    """Same guarantee as before, just moved: a failed card send rolls
+    ClaimStatus back to '' so the trader can send /claim again."""
     monkeypatch.setattr(trader.asyncio, "sleep", AsyncMock())
     store = MagicMock()
     store.find_by_chat_id.return_value = {"_row": 9, "ChatID": "444444", "Funded": "TRUE", "ClaimStatus": ""}
@@ -271,14 +334,54 @@ def test_claim_card_failure_rolls_back_the_status(monkeypatch):
     context = MagicMock()
     context.bot_data = {"store": store, "mod_group_chat_id": -100}
     context.bot.send_message = AsyncMock(side_effect=RuntimeError("mod group unreachable"))
-    update = _make_update(444444, "/claim")
+    update, query = _make_callback_update(444444, "claimconfirm:444444")
 
-    asyncio.run(trader.claim(update, context))
+    asyncio.run(trader.handle_claim_confirmation(update, context))
 
-    update.message.reply_text.assert_awaited_once_with(messages.CLAIM_SUBMIT_RETRY)
+    query.edit_message_text.assert_awaited_once_with(messages.CLAIM_SUBMIT_RETRY)
     writes = [c.args for c in store.update_cell.call_args_list]
     assert (9, "ClaimStatus", "REQUESTED") in writes
     assert writes[-1] == (9, "ClaimStatus", "")  # rollback is the last write
+
+
+def test_claim_cancel_writes_nothing():
+    """Tapping Cancel just acknowledges - no sheet write, no mod card."""
+    store = MagicMock()
+    context = MagicMock()
+    context.bot_data = {"store": store, "mod_group_chat_id": -100}
+    context.bot.send_message = AsyncMock()
+    update, query = _make_callback_update(444444, "claimcancel:444444")
+
+    asyncio.run(trader.handle_claim_confirmation(update, context))
+
+    store.find_by_chat_id.assert_not_called()
+    store.update_cell.assert_not_called()
+    context.bot.send_message.assert_not_called()
+    query.edit_message_text.assert_awaited_once_with(messages.CLAIM_CANCELLED)
+
+
+def test_claim_confirmation_does_not_double_submit():
+    """If a stale prompt gets confirmed after the claim was already
+    submitted (e.g. they tapped /claim twice and confirmed an older
+    prompt), it must not post a second mod card."""
+    store = MagicMock()
+    store.find_by_chat_id.return_value = {
+        "_row": 9,
+        "ChatID": "444444",
+        "Funded": "TRUE",
+        "ClaimStatus": "REQUESTED",
+    }
+    store.is_true.side_effect = lambda row, col: str(row.get(col, "")).strip().upper() == "TRUE"
+    context = MagicMock()
+    context.bot_data = {"store": store, "mod_group_chat_id": -100}
+    context.bot.send_message = AsyncMock()
+    update, query = _make_callback_update(444444, "claimconfirm:444444")
+
+    asyncio.run(trader.handle_claim_confirmation(update, context))
+
+    store.update_cell.assert_not_called()
+    context.bot.send_message.assert_not_called()
+    query.edit_message_text.assert_awaited_once_with(messages.CLAIM_RECEIVED)
 
 
 def test_claim_blocked_when_too_soon_after_funding(monkeypatch):
@@ -351,8 +454,9 @@ def test_claim_allowed_once_min_delay_has_passed(monkeypatch):
 
     asyncio.run(trader.claim(update, context))
 
-    store.update_cell.assert_called_once_with(9, "ClaimStatus", "REQUESTED")
-    update.message.reply_text.assert_awaited_once_with(messages.CLAIM_RECEIVED)
+    store.update_cell.assert_not_called()  # confirmation prompt, not a direct submit
+    call = update.message.reply_text.call_args
+    assert "reply_markup" in call.kwargs
 
 
 def test_claim_skips_the_delay_check_when_funded_at_is_missing(monkeypatch):
@@ -368,7 +472,7 @@ def test_claim_skips_the_delay_check_when_funded_at_is_missing(monkeypatch):
         "ClaimStatus": "",
     }
     store.is_true.side_effect = lambda row, col: str(row.get(col, "")).strip().upper() == "TRUE"
-    store.get_config.return_value = {"min_claim_delay_minutes": "15"}
+    store.get_config.return_value = {"min_claim_delay_minutes": "15", "target_amount": "$10,000"}
     context = MagicMock()
     context.bot_data = {"store": store, "mod_group_chat_id": -100}
     context.bot.send_message = AsyncMock()
@@ -376,8 +480,9 @@ def test_claim_skips_the_delay_check_when_funded_at_is_missing(monkeypatch):
 
     asyncio.run(trader.claim(update, context))
 
-    store.update_cell.assert_called_once_with(9, "ClaimStatus", "REQUESTED")
-    update.message.reply_text.assert_awaited_once_with(messages.CLAIM_RECEIVED)
+    store.update_cell.assert_not_called()  # confirmation prompt, not a direct submit
+    call = update.message.reply_text.call_args
+    assert "reply_markup" in call.kwargs
 
 
 def test_wallet_command_resends_guide_when_awaiting():

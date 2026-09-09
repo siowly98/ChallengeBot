@@ -9,7 +9,7 @@ import logging
 import re
 from datetime import datetime, timedelta, timezone
 
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from .. import messages
@@ -148,17 +148,68 @@ async def claim(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("You're already verified - check earlier messages for your claim steps.")
         return
 
+    # Nothing gets written yet - too many claims were coming in from people
+    # who'd been spamming /claim without hitting the target, some even
+    # after getting liquidated. This puts a real decision point (and a
+    # real warning) in front of the write instead of firing a mod card off
+    # a single tap. The ClaimStatus write only happens in
+    # handle_claim_confirmation below, if they tap Confirm. Keyed on
+    # ChatID, not row number - same reasoning as the mod cards in
+    # bot/mod_cards.py.
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("✅ Yes, I've hit target", callback_data=f"claimconfirm:{row['ChatID']}"),
+                InlineKeyboardButton("❌ Cancel", callback_data=f"claimcancel:{row['ChatID']}"),
+            ]
+        ]
+    )
+    await update.message.reply_text(messages.render(messages.CLAIM_CONFIRM_PROMPT, cfg), reply_markup=keyboard)
+
+
+async def handle_claim_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles the Confirm/Cancel tap from the prompt claim() sends. Only
+    ever posted in a trader's own private chat with the bot (claim() is
+    disabled inside the mod group), so no chat check needed here the way
+    admin.handle_button needs one for the mod group's shared buttons."""
+    query = update.callback_query
+    action, id_str = query.data.split(":")
+    try:
+        chat_id = int(id_str)
+    except ValueError:
+        await query.answer("Something's off with this button - just send /claim again.", show_alert=True)
+        return
+
+    if action == "claimcancel":
+        await query.edit_message_text(messages.CLAIM_CANCELLED)
+        await query.answer()
+        return
+
+    store = get_store(context)
+    row = await asyncio.to_thread(store.find_by_chat_id, chat_id)
+    if row is None or not store.is_true(row, "Funded"):
+        await query.answer("Something's changed since you tapped /claim - send it again.", show_alert=True)
+        return
+    if row.get("ClaimStatus") in ("REQUESTED", "VERIFIED"):
+        # Already submitted (e.g. they tapped /claim twice and confirmed an
+        # older prompt) - don't post a second card, just reflect reality.
+        await query.edit_message_text(messages.CLAIM_RECEIVED)
+        await query.answer()
+        return
+
     await asyncio.to_thread(store.update_cell, row["_row"], "ClaimStatus", "REQUESTED")
     row["ClaimStatus"] = "REQUESTED"
-    text, keyboard = claim_requested_card(row, cfg)
+    cfg = await asyncio.to_thread(store.get_config)
+    text, card_keyboard = claim_requested_card(row, cfg)
 
-    if await _post_mod_card(context, text, keyboard):
-        await update.message.reply_text(messages.CLAIM_RECEIVED)
+    if await _post_mod_card(context, text, card_keyboard):
+        await query.edit_message_text(messages.CLAIM_RECEIVED)
     else:
         # Card never reached the mods - roll the status back so /claim works
         # again, instead of leaving a REQUESTED claim no mod can see or act on.
         await asyncio.to_thread(store.update_cell, row["_row"], "ClaimStatus", "")
-        await update.message.reply_text(messages.CLAIM_SUBMIT_RETRY)
+        await query.edit_message_text(messages.CLAIM_SUBMIT_RETRY)
+    await query.answer()
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):

@@ -27,7 +27,9 @@ and act on it within `POLL_INTERVAL_SECONDS`.
 5. Mod sends the actual testnet USDC (still manual) and taps the button →
    bot auto-DMs the funded confirmation + setup guide.
 6. Trader sends `/claim` when they think they've doubled their account →
-   bot posts a card in the mod group with **Verify** / **Reject** buttons.
+   bot replies with a confirm/cancel prompt and a blacklist warning (see
+   below) → tapping **Confirm** is what actually posts a card in the mod
+   group with **Verify** / **Reject** buttons.
 7. Mod manually checks the account (still manual, still a human call) and
    taps a button → bot auto-DMs claim instructions or a rejection.
 8. For winners: a mod manually creates the 1:1 private group (low volume,
@@ -187,6 +189,27 @@ actually hit the target balance (that's still a manual mod check on the
 claim card, same as before) - it just filters out claims that are
 obviously too early, before a claim card is ever created, so mods don't
 see them at all. Set it to `0` to disable the check entirely.
+
+### Claim confirmation
+
+Once past the delay above, `/claim` doesn't post a mod card right away -
+it first replies with a confirm/cancel prompt (`bot/handlers/trader.py`,
+`handle_claim_confirmation`) that spells out the consequence of a false
+claim: "you'll be blacklisted immediately". This exists because people
+were spamming `/claim` regardless of whether they'd actually hit the
+target, in some cases even after their account had already been
+liquidated. Nothing gets written to the sheet until they tap **Confirm** -
+tapping **Cancel**, or just ignoring the prompt, leaves their row
+untouched and they can `/claim` again later.
+
+The warning is currently just words, not an enforced mechanism - there's
+no `Blacklisted` column or automatic block on a repeat offender. A mod
+still has to notice the pattern and decide what to do about it (e.g.
+`REJECTED` isn't a dead end - the trader can just `/claim` again later),
+the same way "false claim" itself is a human judgment call. If you want
+an actual blacklist (e.g. a sheet column the bot checks before letting
+someone link, submit a wallet, or claim at all), that's a separate
+feature to build, not something this prompt does on its own.
 
 ### Per-participant challenge deadline
 
