@@ -455,6 +455,52 @@ def test_fund_action_writes_funded_at_and_computes_deadline(monkeypatch):
     assert "weekend" not in edited_text.lower()  # Tuesday funding, no warning
 
 
+def test_fund_action_guards_against_missing_chat_id():
+    """Regression test: a row with a blank ChatID (hand-edited sheet, stale
+    data, whatever) used to crash int(row["ChatID"]) with an uncaught
+    ValueError, surfacing as the generic 'something went wrong' error - and
+    in the fund branch specifically, the sheet write happened BEFORE that
+    crash, so the row was left marked Funded=TRUE with the trader never
+    actually notified. The handler must catch this before writing anything
+    or messaging anyone, and tell the mod plainly what's wrong."""
+    store = MagicMock()
+    store.find_by_row.return_value = {"_row": 73, "ChatID": "", "Eligible": "TRUE"}
+    context = MagicMock()
+    context.bot_data = {"store": store, "mod_group_chat_id": -100}
+    context.bot.send_message = AsyncMock()
+    update, query = _make_callback_update(-100, "fund:73")
+
+    asyncio.run(admin.handle_button(update, context))
+
+    store.update_cells.assert_not_called()
+    store.update_cell.assert_not_called()
+    context.bot.send_message.assert_not_called()
+    query.edit_message_text.assert_not_called()
+    alert_text = query.answer.call_args[0][0]
+    assert "chatid" in alert_text.lower()
+    assert query.answer.call_args.kwargs.get("show_alert") is True
+
+
+def test_verify_and_reject_actions_also_guard_against_missing_chat_id():
+    """Same guard, exercised through the verify and reject branches too -
+    not just fund."""
+    store = MagicMock()
+    store.find_by_row.return_value = {"_row": 5, "ChatID": None, "ClaimStatus": "REQUESTED"}
+    context = MagicMock()
+    context.bot_data = {"store": store, "mod_group_chat_id": -100}
+    context.bot.send_message = AsyncMock()
+
+    for action in ("verify", "reject"):
+        store.reset_mock()
+        context.bot.send_message.reset_mock()
+        update, query = _make_callback_update(-100, f"{action}:5")
+        asyncio.run(admin.handle_button(update, context))
+        store.update_cells.assert_not_called()
+        store.update_cell.assert_not_called()
+        context.bot.send_message.assert_not_called()
+        query.edit_message_text.assert_not_called()
+
+
 def test_fund_action_warns_on_late_week_funding(monkeypatch):
     """Funding on a Thursday/Friday/weekend gets a heads-up note on the mod
     card - display-only, doesn't block the fund action itself."""

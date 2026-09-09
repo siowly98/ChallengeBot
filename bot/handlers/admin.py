@@ -36,6 +36,20 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if row is None:
         await query.answer("Couldn't find that row anymore - check the sheet.", show_alert=True)
         return
+    if not row.get("ChatID"):
+        # Same guard invite() already has. Every trader-facing branch below
+        # needs int(row["ChatID"]) to message them - if that cell is empty
+        # (hand-edited sheet, stale data, whatever), int("") raises
+        # ValueError and the mod just sees the generic "something went
+        # wrong" error with no idea why. Catching it here, before any
+        # sheet write happens, means a bad row fails loud and early instead
+        # of (in the "fund" branch) getting marked Funded=TRUE while the
+        # trader never actually gets notified.
+        await query.answer(
+            "That trader hasn't linked their Telegram (ChatID is blank) - check the sheet.",
+            show_alert=True,
+        )
+        return
 
     mod_name = query.from_user.first_name or "a mod"
 
