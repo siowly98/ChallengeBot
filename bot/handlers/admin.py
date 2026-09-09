@@ -10,7 +10,6 @@ from datetime import datetime, timezone
 
 from telegram import Update
 from telegram.ext import ContextTypes
-from telegram.helpers import escape_markdown
 
 from .. import messages
 from ..deadlines import compute_deadline, format_deadline, format_timedelta, funded_late_in_week
@@ -38,9 +37,7 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer("Couldn't find that row anymore - check the sheet.", show_alert=True)
         return
 
-    # A mod's Telegram display name is just as unescaped/arbitrary as a
-    # trader's - same Markdown-breaks-on-underscore risk applies here too.
-    mod_name = escape_markdown(query.from_user.first_name or "a mod", version=1)
+    mod_name = query.from_user.first_name or "a mod"
 
     if action == "fund":
         cfg = await asyncio.to_thread(store.get_config)
@@ -64,7 +61,10 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Display-only nudge - mods still decide, nothing here blocks
             # funding on a Thursday/Friday/weekend.
             note += "\n⚠️ Funded Thu-Sun - this window will include a weekend day"
-        await query.edit_message_text(f"{query.message.text}{note}", parse_mode="Markdown")
+        # No parse_mode here - see the comment on the "verify" branch below,
+        # No parse_mode - see the comment on this same call in the "verify"
+        # branch below.
+        await query.edit_message_text(f"{query.message.text}{note}")
 
     elif action == "verify":
         cfg = await asyncio.to_thread(store.get_config)
@@ -75,7 +75,18 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             chat_id=int(row["ChatID"]),
             text=messages.render(messages.CLAIM_VERIFIED, cfg),
         )
-        await query.edit_message_text(f"{query.message.text}\n\n✅ Verified by {mod_name}", parse_mode="Markdown")
+        # query.message.text is the card as Telegram rendered it, NOT the
+        # raw Markdown source we originally sent - Telegram strips
+        # formatting syntax on delivery (the escaped underscores that
+        # protected a username like john_the_trader_99 are gone, leaving
+        # bare underscores in the plain text). Re-parsing that as Markdown
+        # a second time treats those bare underscores as unclosed italic
+        # markers and Telegram rejects the whole edit - which was making
+        # EVERY Fund/Verify/Reject tap fail whenever the card had an
+        # odd number of underscores anywhere in it (very common in
+        # usernames). Editing without parse_mode avoids re-parsing
+        # already-rendered text as if it were still source.
+        await query.edit_message_text(f"{query.message.text}\n\n✅ Verified by {mod_name}")
 
     elif action == "reject":
         await asyncio.to_thread(store.update_cell, row["_row"], "ClaimStatus", "REJECTED")
@@ -85,7 +96,7 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reason=f"Message a mod if you have questions: {messages.CONTACT_LINK}"
             ),
         )
-        await query.edit_message_text(f"{query.message.text}\n\n❌ Rejected by {mod_name}", parse_mode="Markdown")
+        await query.edit_message_text(f"{query.message.text}\n\n❌ Rejected by {mod_name}")
 
     await query.answer()
 

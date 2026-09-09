@@ -488,6 +488,49 @@ def test_fund_action_warns_on_late_week_funding(monkeypatch):
     assert "weekend" in edited_text.lower()
 
 
+def test_fund_action_edits_the_card_without_reparsing_markdown(monkeypatch):
+    """Regression test: query.message.text is Telegram's RENDERED plain
+    text, not the raw Markdown source originally sent - the escaping
+    backslashes that protected underscores in a username never survive
+    rendering. Appending to that text and re-sending it through
+    parse_mode="Markdown" a second time treats bare underscores as
+    unclosed italic markers, and Telegram rejects the whole edit - which
+    broke every Fund/Verify/Reject tap on any card whose text had an odd
+    number of underscores anywhere in it (i.e. most usernames). The edit
+    must not re-parse already-rendered text as Markdown."""
+    fixed_now = datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc)
+
+    class _FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed_now
+
+    monkeypatch.setattr(admin, "datetime", _FixedDatetime)
+
+    store = MagicMock()
+    store.find_by_row.return_value = {"_row": 3, "ChatID": "555", "Eligible": "TRUE"}
+    store.get_config.return_value = {
+        "start_amount": "$5,000",
+        "target_amount": "$10,000",
+        "prize_amount": "$100",
+        "challenge_duration": "3 days",
+        "challenge_duration_hours": "72",
+        "guide_link": "https://example.com/guide",
+    }
+    context = MagicMock()
+    context.bot_data = {"store": store, "mod_group_chat_id": -100}
+    context.bot.send_message = AsyncMock()
+    update, query = _make_callback_update(-100, "fund:3")
+    # What Telegram actually hands back on a callback - rendered plain
+    # text, bare underscores and all.
+    query.message.text = "Telegram: @john_the_trader_99"
+
+    asyncio.run(admin.handle_button(update, context))
+
+    call = query.edit_message_text.call_args
+    assert "parse_mode" not in call.kwargs or call.kwargs["parse_mode"] is None
+
+
 def test_status_shows_deadline_when_funded():
     funded_at = datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc)
     store = MagicMock()
