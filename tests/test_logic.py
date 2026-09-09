@@ -213,6 +213,7 @@ def test_resubmitting_own_wallet_is_not_blocked():
     store = MagicMock()
     store.find_by_chat_id.return_value = {
         "_row": 7,
+        "ChatID": "333333",
         "Eligible": "TRUE",
         "ApprovalSent": "TRUE",
         "WalletAddress": "",
@@ -237,6 +238,7 @@ def test_wallet_card_failure_rolls_back_the_write(monkeypatch):
     store = MagicMock()
     store.find_by_chat_id.return_value = {
         "_row": 7,
+        "ChatID": "333333",
         "Eligible": "TRUE",
         "ApprovalSent": "TRUE",
         "WalletAddress": "",
@@ -263,7 +265,7 @@ def test_claim_card_failure_rolls_back_the_status(monkeypatch):
     to '' so the trader can send /claim again."""
     monkeypatch.setattr(trader.asyncio, "sleep", AsyncMock())
     store = MagicMock()
-    store.find_by_chat_id.return_value = {"_row": 9, "Funded": "TRUE", "ClaimStatus": ""}
+    store.find_by_chat_id.return_value = {"_row": 9, "ChatID": "444444", "Funded": "TRUE", "ClaimStatus": ""}
     store.is_true.side_effect = lambda row, col: str(row.get(col, "")).strip().upper() == "TRUE"
     store.get_config.return_value = {"challenge_duration_hours": "72"}
     context = MagicMock()
@@ -368,6 +370,7 @@ def test_mod_card_escapes_underscores_in_dynamic_fields():
     underscore coming from row data must show up backslash-escaped."""
     row = {
         "_row": 5,
+        "ChatID": "555",
         "Email Address": "john_doe.test@x.com",
         "TelegramUsername": "john_the_trader_99",
         "WalletAddress": "0x" + "a" * 40,
@@ -425,7 +428,7 @@ def test_fund_action_writes_funded_at_and_computes_deadline(monkeypatch):
     monkeypatch.setattr(admin, "datetime", _FixedDatetime)
 
     store = MagicMock()
-    store.find_by_row.return_value = {"_row": 3, "ChatID": "555", "Eligible": "TRUE"}
+    store.find_by_chat_id.return_value = {"_row": 3, "ChatID": "555", "Eligible": "TRUE"}
     store.get_config.return_value = {
         "start_amount": "$5,000",
         "target_amount": "$10,000",
@@ -437,16 +440,18 @@ def test_fund_action_writes_funded_at_and_computes_deadline(monkeypatch):
     context = MagicMock()
     context.bot_data = {"store": store, "mod_group_chat_id": -100}
     context.bot.send_message = AsyncMock()
-    update, query = _make_callback_update(-100, "fund:3")
+    update, query = _make_callback_update(-100, "fund:555")
 
     asyncio.run(admin.handle_button(update, context))
 
+    store.find_by_chat_id.assert_called_once_with(555)
     updates = store.update_cells.call_args[0][1]
     assert updates["Funded"] == "TRUE"
     assert updates["FundedAt"] == fixed_now.isoformat()
 
     # Deadline = FundedAt + 72h = Fri Sep 11, 12:00 UTC
     sent_text = context.bot.send_message.call_args.kwargs["text"]
+    assert context.bot.send_message.call_args.kwargs["chat_id"] == 555
     assert "Sep 11" in sent_text
     assert "{deadline}" not in sent_text  # placeholder must actually get filled
 
@@ -455,20 +460,51 @@ def test_fund_action_writes_funded_at_and_computes_deadline(monkeypatch):
     assert "weekend" not in edited_text.lower()  # Tuesday funding, no warning
 
 
-def test_fund_action_guards_against_missing_chat_id():
-    """Regression test: a row with a blank ChatID (hand-edited sheet, stale
-    data, whatever) used to crash int(row["ChatID"]) with an uncaught
-    ValueError, surfacing as the generic 'something went wrong' error - and
-    in the fund branch specifically, the sheet write happened BEFORE that
-    crash, so the row was left marked Funded=TRUE with the trader never
-    actually notified. The handler must catch this before writing anything
-    or messaging anyone, and tell the mod plainly what's wrong."""
+def test_handle_button_looks_up_the_trader_by_chat_id_not_row_number():
+    """Regression test: cards used to encode the sheet ROW number
+    (fund:73), which broke the moment a row got inserted/deleted/sorted
+    above it - the button would then point at a different, unrelated row
+    (often blank), and a mod would see 'that trader hasn't linked their
+    Telegram' for a trader who plainly had. Row numbers shifting after a
+    card was sent must not affect which trader gets acted on, because the
+    lookup no longer goes through the row number at all - only ChatID,
+    which doesn't move."""
     store = MagicMock()
-    store.find_by_row.return_value = {"_row": 73, "ChatID": "", "Eligible": "TRUE"}
+    store.find_by_row.return_value = None  # would be wrong/stale if used
+    store.find_by_chat_id.return_value = {"_row": 378, "ChatID": "555", "Eligible": "TRUE"}
+    store.get_config.return_value = {
+        "start_amount": "$5,000",
+        "target_amount": "$10,000",
+        "prize_amount": "$100",
+        "challenge_duration": "3 days",
+        "challenge_duration_hours": "72",
+        "guide_link": "https://example.com/guide",
+    }
     context = MagicMock()
     context.bot_data = {"store": store, "mod_group_chat_id": -100}
     context.bot.send_message = AsyncMock()
-    update, query = _make_callback_update(-100, "fund:73")
+    update, query = _make_callback_update(-100, "fund:555")
+
+    asyncio.run(admin.handle_button(update, context))
+
+    store.find_by_row.assert_not_called()
+    store.find_by_chat_id.assert_called_once_with(555)
+    assert context.bot.send_message.call_args.kwargs["chat_id"] == 555
+    # Writes go to whatever row find_by_chat_id currently reports - 378
+    # here - never a row number baked into the button itself.
+    assert store.update_cells.call_args[0][0] == 378
+
+
+def test_fund_action_handles_a_trader_no_longer_found_by_chat_id():
+    """If find_by_chat_id comes back empty (row deleted, or a very old
+    card from before this trader ever existed), the mod gets a clear
+    message and nothing is written or sent - no crash."""
+    store = MagicMock()
+    store.find_by_chat_id.return_value = None
+    context = MagicMock()
+    context.bot_data = {"store": store, "mod_group_chat_id": -100}
+    context.bot.send_message = AsyncMock()
+    update, query = _make_callback_update(-100, "fund:999")
 
     asyncio.run(admin.handle_button(update, context))
 
@@ -477,28 +513,26 @@ def test_fund_action_guards_against_missing_chat_id():
     context.bot.send_message.assert_not_called()
     query.edit_message_text.assert_not_called()
     alert_text = query.answer.call_args[0][0]
-    assert "chatid" in alert_text.lower()
+    assert "couldn't find that trader" in alert_text.lower()
     assert query.answer.call_args.kwargs.get("show_alert") is True
 
 
-def test_verify_and_reject_actions_also_guard_against_missing_chat_id():
-    """Same guard, exercised through the verify and reject branches too -
-    not just fund."""
+def test_handle_button_rejects_non_numeric_callback_data():
+    """Belt-and-suspenders: any leftover card from before ChatID-keying
+    (or any other malformed callback_data) fails loud with a clear message
+    instead of raising ValueError out of int()."""
     store = MagicMock()
-    store.find_by_row.return_value = {"_row": 5, "ChatID": None, "ClaimStatus": "REQUESTED"}
     context = MagicMock()
     context.bot_data = {"store": store, "mod_group_chat_id": -100}
     context.bot.send_message = AsyncMock()
+    update, query = _make_callback_update(-100, "fund:not-a-number")
 
-    for action in ("verify", "reject"):
-        store.reset_mock()
-        context.bot.send_message.reset_mock()
-        update, query = _make_callback_update(-100, f"{action}:5")
-        asyncio.run(admin.handle_button(update, context))
-        store.update_cells.assert_not_called()
-        store.update_cell.assert_not_called()
-        context.bot.send_message.assert_not_called()
-        query.edit_message_text.assert_not_called()
+    asyncio.run(admin.handle_button(update, context))
+
+    store.find_by_chat_id.assert_not_called()
+    context.bot.send_message.assert_not_called()
+    query.answer.assert_called_once()
+    assert query.answer.call_args.kwargs.get("show_alert") is True
 
 
 def test_fund_action_warns_on_late_week_funding(monkeypatch):
@@ -514,7 +548,7 @@ def test_fund_action_warns_on_late_week_funding(monkeypatch):
     monkeypatch.setattr(admin, "datetime", _FixedDatetime)
 
     store = MagicMock()
-    store.find_by_row.return_value = {"_row": 4, "ChatID": "556", "Eligible": "TRUE"}
+    store.find_by_chat_id.return_value = {"_row": 4, "ChatID": "556", "Eligible": "TRUE"}
     store.get_config.return_value = {
         "start_amount": "$5,000",
         "target_amount": "$10,000",
@@ -526,7 +560,7 @@ def test_fund_action_warns_on_late_week_funding(monkeypatch):
     context = MagicMock()
     context.bot_data = {"store": store, "mod_group_chat_id": -100}
     context.bot.send_message = AsyncMock()
-    update, query = _make_callback_update(-100, "fund:4")
+    update, query = _make_callback_update(-100, "fund:556")
 
     asyncio.run(admin.handle_button(update, context))
 
@@ -554,7 +588,7 @@ def test_fund_action_edits_the_card_without_reparsing_markdown(monkeypatch):
     monkeypatch.setattr(admin, "datetime", _FixedDatetime)
 
     store = MagicMock()
-    store.find_by_row.return_value = {"_row": 3, "ChatID": "555", "Eligible": "TRUE"}
+    store.find_by_chat_id.return_value = {"_row": 3, "ChatID": "555", "Eligible": "TRUE"}
     store.get_config.return_value = {
         "start_amount": "$5,000",
         "target_amount": "$10,000",
@@ -566,7 +600,7 @@ def test_fund_action_edits_the_card_without_reparsing_markdown(monkeypatch):
     context = MagicMock()
     context.bot_data = {"store": store, "mod_group_chat_id": -100}
     context.bot.send_message = AsyncMock()
-    update, query = _make_callback_update(-100, "fund:3")
+    update, query = _make_callback_update(-100, "fund:555")
     # What Telegram actually hands back on a callback - rendered plain
     # text, bare underscores and all.
     query.message.text = "Telegram: @john_the_trader_99"
@@ -695,6 +729,7 @@ def test_claim_card_shows_time_left_when_claimed_before_deadline(monkeypatch):
     funded_at = datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc)
     row = {
         "_row": 5,
+        "ChatID": "555",
         "Email Address": "a@x.com",
         "TelegramUsername": "trader1",
         "WalletAddress": "0x" + "a" * 40,
@@ -723,6 +758,7 @@ def test_claim_card_shows_late_when_claimed_after_deadline(monkeypatch):
     funded_at = datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc)
     row = {
         "_row": 5,
+        "ChatID": "555",
         "Email Address": "a@x.com",
         "TelegramUsername": "trader1",
         "WalletAddress": "0x" + "a" * 40,

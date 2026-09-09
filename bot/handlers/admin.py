@@ -31,24 +31,25 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     store = get_store(context)
-    action, row_str = query.data.split(":")
-    row = await asyncio.to_thread(store.find_by_row, int(row_str))
-    if row is None:
-        await query.answer("Couldn't find that row anymore - check the sheet.", show_alert=True)
+    action, id_str = query.data.split(":")
+    # Cards used to encode the sheet ROW number at send time (fund:73).
+    # That breaks the moment anyone inserts, deletes, or sorts rows above
+    # it afterwards - every row below the change shifts, so an old card's
+    # button now points at a different, unrelated row (often one with a
+    # blank ChatID, which is what "That trader hasn't linked their
+    # Telegram" turned out to actually mean - not a data problem, a stale
+    # pointer problem). ChatID doesn't move when rows shift, and it's
+    # always present by the time a card exists (funding/claim cards only
+    # get built after the trader has already linked), so cards now encode
+    # that instead and we look the row up by it.
+    try:
+        chat_id = int(id_str)
+    except ValueError:
+        await query.answer("This button is from an old card format - use /check and the sheet instead.", show_alert=True)
         return
-    if not row.get("ChatID"):
-        # Same guard invite() already has. Every trader-facing branch below
-        # needs int(row["ChatID"]) to message them - if that cell is empty
-        # (hand-edited sheet, stale data, whatever), int("") raises
-        # ValueError and the mod just sees the generic "something went
-        # wrong" error with no idea why. Catching it here, before any
-        # sheet write happens, means a bad row fails loud and early instead
-        # of (in the "fund" branch) getting marked Funded=TRUE while the
-        # trader never actually gets notified.
-        await query.answer(
-            "That trader hasn't linked their Telegram (ChatID is blank) - check the sheet.",
-            show_alert=True,
-        )
+    row = await asyncio.to_thread(store.find_by_chat_id, chat_id)
+    if row is None:
+        await query.answer("Couldn't find that trader anymore - check the sheet.", show_alert=True)
         return
 
     mod_name = query.from_user.first_name or "a mod"
@@ -67,7 +68,7 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         deadline = compute_deadline(funded_at.isoformat(), cfg.get("challenge_duration_hours"))
         deadline_str = format_deadline(deadline) if deadline else "the deadline"
         await context.bot.send_message(
-            chat_id=int(row["ChatID"]),
+            chat_id=chat_id,
             text=messages.render(messages.FUNDED_AND_GUIDE, cfg, deadline=deadline_str),
         )
         note = f"\n\n✅ Funded by {mod_name} - ends {deadline_str}"
@@ -86,7 +87,7 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             store.update_cells, row["_row"], {"ClaimStatus": "VERIFIED", "ClaimInstructionsSent": "TRUE"}
         )
         await context.bot.send_message(
-            chat_id=int(row["ChatID"]),
+            chat_id=chat_id,
             text=messages.render(messages.CLAIM_VERIFIED, cfg),
         )
         # query.message.text is the card as Telegram rendered it, NOT the
@@ -105,7 +106,7 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif action == "reject":
         await asyncio.to_thread(store.update_cell, row["_row"], "ClaimStatus", "REJECTED")
         await context.bot.send_message(
-            chat_id=int(row["ChatID"]),
+            chat_id=chat_id,
             text=messages.CLAIM_REJECTED.format(
                 reason=f"Message a mod if you have questions: {messages.CONTACT_LINK}"
             ),

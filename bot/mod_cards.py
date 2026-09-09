@@ -57,8 +57,13 @@ def wallet_submitted_card(row: dict, cfg: dict):
         f"{_repeat_participant_line(row)}\n"
         f"Send the {_md(cfg.get('start_amount', '$5,000'))} testnet USDC, then tap below."
     )
+    # Keyed on ChatID, not the sheet row number - row numbers shift
+    # whenever a row is inserted, deleted, or the sheet gets sorted, which
+    # would silently point an already-sent card at the wrong row later.
+    # ChatID is stable and is already guaranteed to be set by this point
+    # (wallet submission only happens after linking).
     keyboard = InlineKeyboardMarkup(
-        [[InlineKeyboardButton("✅ Mark Funded", callback_data=f"fund:{row['_row']}")]]
+        [[InlineKeyboardButton("✅ Mark Funded", callback_data=f"fund:{row['ChatID']}")]]
     )
     return text, keyboard
 
@@ -87,11 +92,14 @@ def claim_requested_card(row: dict, cfg: dict):
         f"{_repeat_participant_line(row)}\n"
         f"Go check their testnet account, then tap below."
     )
+    # Same reasoning as wallet_submitted_card above - keyed on ChatID, not
+    # the row number, so a card sent before a later row shift still points
+    # at the right trader.
     keyboard = InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton("✅ Verify win", callback_data=f"verify:{row['_row']}"),
-                InlineKeyboardButton("❌ Reject", callback_data=f"reject:{row['_row']}"),
+                InlineKeyboardButton("✅ Verify win", callback_data=f"verify:{row['ChatID']}"),
+                InlineKeyboardButton("❌ Reject", callback_data=f"reject:{row['ChatID']}"),
             ]
         ]
     )

@@ -223,14 +223,23 @@ push + Railway redeploy.
 
 ## Mod commands (used inside the mod group)
 
-- Tap the buttons on a card - this is the main interaction.
+- Tap the buttons on a card - this is the main interaction. These buttons
+  are keyed on the trader's `ChatID`, not their sheet row number, so
+  inserting, deleting, or sorting rows in the sheet afterwards is safe -
+  an already-sent card still points at the right trader even if their row
+  number changes. A card sent before this fix was shipped still encodes
+  the old row-number format and will show "This button is from an old
+  card format" if tapped after the row numbers have shifted - use `/check`
+  and the sheet directly for those instead of re-tapping them.
 - `/invite <sheet_row_number> <invite_link>` - DMs a trader their private
-  group invite link. The row number is visible on their card in this
-  group.
+  group invite link. Look the row number up in the sheet itself (not
+  the card - the card doesn't show it).
 - `/check <sheet_row_number>` - read-only lookup of a trader's status and
   challenge deadline without leaving the group or opening the sheet.
   Doesn't change anything - use it to spot-check someone, or to double
-  check a claim's timing beyond what's already on the claim card.
+  check a claim's timing beyond what's already on the claim card. Since
+  this takes the row number you currently see in the sheet, it's always
+  accurate regardless of past row shifts.
 
 Trader-facing commands (`/start`, `/status`, `/claim`) and the plain-text
 email/wallet flow are deliberately disabled inside the mod group - a mod
