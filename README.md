@@ -158,6 +158,7 @@ each of these keys:
 | `Guide Link` | link to your setup guide |
 | `Claim Instructions Link` | link to your prize-claim instructions |
 | `Google Form Link` | link to the Challenge application form |
+| `Min Claim Delay Minutes` | `15` |
 
 Key names aren't case-sensitive and ignore spacing (`Prize Amount`,
 `prize amount`, and `PRIZE_AMOUNT` all work) - use whatever's readable.
@@ -177,6 +178,15 @@ the message covers both).
 does deadline math with (`72`) - keep the two in sync by hand if you
 change the round length. There's no `Challenge Start Date` key anymore:
 see "Per-participant challenge deadline" below for why.
+
+`Min Claim Delay Minutes` blocks `/claim` for that many minutes after a
+trader gets funded - it exists because the funded message is also the
+message that tells them `/claim` exists, and some traders tap it
+immediately, before they've traded at all. This can't verify anyone
+actually hit the target balance (that's still a manual mod check on the
+claim card, same as before) - it just filters out claims that are
+obviously too early, before a claim card is ever created, so mods don't
+see them at all. Set it to `0` to disable the check entirely.
 
 ### Per-participant challenge deadline
 

@@ -7,12 +7,13 @@ the sheet.
 import asyncio
 import logging
 import re
+from datetime import datetime, timedelta, timezone
 
 from telegram import Update
 from telegram.ext import ContextTypes
 
 from .. import messages
-from ..deadlines import compute_deadline, format_deadline
+from ..deadlines import compute_deadline, format_deadline, format_timedelta, time_since_funded
 from ..mod_cards import claim_requested_card, wallet_submitted_card
 from ..sheets import SheetStore
 
@@ -119,6 +120,27 @@ async def claim(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not store.is_true(row, "Funded"):
         await update.message.reply_text(messages.CLAIM_NOT_ELIGIBLE)
         return
+
+    cfg = await asyncio.to_thread(store.get_config)
+
+    # People tap /claim the moment the funded message arrives - it's the
+    # same message that tells them /claim exists, and it's easy to tap
+    # before actually trading. This can't verify they hit the target (that's
+    # still a manual mod check on the card below), it just filters out
+    # claims that are obviously too early to be real - blocked before a
+    # REQUESTED card ever gets created, so mods aren't seeing these at all.
+    elapsed = time_since_funded(row.get("FundedAt"), datetime.now(timezone.utc))
+    if elapsed is not None:
+        try:
+            min_delay = timedelta(minutes=float(cfg.get("min_claim_delay_minutes", 15)))
+        except (TypeError, ValueError):
+            min_delay = timedelta(minutes=15)
+        if elapsed < min_delay:
+            await update.message.reply_text(
+                messages.render(messages.CLAIM_TOO_SOON, cfg, wait=format_timedelta(min_delay - elapsed))
+            )
+            return
+
     if row.get("ClaimStatus") == "REQUESTED":
         await update.message.reply_text(messages.CLAIM_ALREADY_SUBMITTED)
         return
@@ -128,7 +150,6 @@ async def claim(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await asyncio.to_thread(store.update_cell, row["_row"], "ClaimStatus", "REQUESTED")
     row["ClaimStatus"] = "REQUESTED"
-    cfg = await asyncio.to_thread(store.get_config)
     text, keyboard = claim_requested_card(row, cfg)
 
     if await _post_mod_card(context, text, keyboard):

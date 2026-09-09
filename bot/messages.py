@@ -131,6 +131,7 @@ FUNDED_AND_GUIDE = (
     "{start_amount} USDC is in! 🐆🔥\n\n"
     "You're officially live in the {challenge_duration} {start_amount} → {target_amount} Challenge from "
     "this exact moment. ⏱️\n\n"
+    "Trade here: {wallet_site_url} (same login you used to get your wallet)\n\n"
     "Reach a {target_amount}+ balance before {deadline} and win {prize_amount}. LFG! 🚀\n\n"
     "Read the full rules and details here:\n{guide_link}\n\n"
     "When you think you've hit the target, come back here and send /claim.\n\n"
@@ -141,6 +142,14 @@ FUNDED_AND_GUIDE = (
 CLAIM_NOT_ELIGIBLE = (
     "We don't have you marked as funded yet, so there's nothing to claim yet. "
     f"If you think this is a mistake, let a mod know: {CONTACT_LINK}"
+)
+
+# {wait} is a render() extra (like {deadline}), not a Config value - it's
+# how much longer they need to wait, computed from their own FundedAt.
+CLAIM_TOO_SOON = (
+    "You just got funded - it's way too early to have hit {target_amount} already. "
+    "Give it some more time and actually trade first.\n\n"
+    "Try /claim again in {wait} or once you've genuinely hit the target, whichever's later."
 )
 
 CLAIM_RECEIVED = (

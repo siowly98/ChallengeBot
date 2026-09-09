@@ -281,6 +281,105 @@ def test_claim_card_failure_rolls_back_the_status(monkeypatch):
     assert writes[-1] == (9, "ClaimStatus", "")  # rollback is the last write
 
 
+def test_claim_blocked_when_too_soon_after_funding(monkeypatch):
+    """Regression test: traders were tapping /claim seconds after the
+    funded message arrived (it's the message that tells them /claim
+    exists), long before they could plausibly have hit the target. This
+    must be blocked before a REQUESTED card is ever created - mods
+    shouldn't see these at all."""
+    fixed_now = datetime(2026, 9, 8, 12, 5, tzinfo=timezone.utc)  # 5 min after funding
+
+    class _FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed_now
+
+    monkeypatch.setattr(trader, "datetime", _FixedDatetime)
+
+    funded_at = datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc)
+    store = MagicMock()
+    store.find_by_chat_id.return_value = {
+        "_row": 9,
+        "ChatID": "444444",
+        "Funded": "TRUE",
+        "FundedAt": funded_at.isoformat(),
+        "ClaimStatus": "",
+    }
+    store.is_true.side_effect = lambda row, col: str(row.get(col, "")).strip().upper() == "TRUE"
+    store.get_config.return_value = {"min_claim_delay_minutes": "15", "target_amount": "$10,000"}
+    context = MagicMock()
+    context.bot_data = {"store": store, "mod_group_chat_id": -100}
+    context.bot.send_message = AsyncMock()
+    update = _make_update(444444, "/claim")
+
+    asyncio.run(trader.claim(update, context))
+
+    store.update_cell.assert_not_called()
+    context.bot.send_message.assert_not_called()
+    sent = update.message.reply_text.call_args[0][0]
+    assert "10 minutes" in sent or "10m" in sent  # 15 min delay - 5 elapsed = 10 left
+    assert "{wait}" not in sent
+
+
+def test_claim_allowed_once_min_delay_has_passed(monkeypatch):
+    """Once the configured delay has elapsed, /claim proceeds as normal -
+    this isn't a permanent block, just a floor on how soon it can fire."""
+    fixed_now = datetime(2026, 9, 8, 12, 20, tzinfo=timezone.utc)  # 20 min after funding
+
+    class _FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed_now
+
+    monkeypatch.setattr(trader, "datetime", _FixedDatetime)
+
+    funded_at = datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc)
+    store = MagicMock()
+    store.find_by_chat_id.return_value = {
+        "_row": 9,
+        "ChatID": "444444",
+        "Funded": "TRUE",
+        "FundedAt": funded_at.isoformat(),
+        "ClaimStatus": "",
+    }
+    store.is_true.side_effect = lambda row, col: str(row.get(col, "")).strip().upper() == "TRUE"
+    store.get_config.return_value = {"min_claim_delay_minutes": "15", "target_amount": "$10,000"}
+    context = MagicMock()
+    context.bot_data = {"store": store, "mod_group_chat_id": -100}
+    context.bot.send_message = AsyncMock()
+    update = _make_update(444444, "/claim")
+
+    asyncio.run(trader.claim(update, context))
+
+    store.update_cell.assert_called_once_with(9, "ClaimStatus", "REQUESTED")
+    update.message.reply_text.assert_awaited_once_with(messages.CLAIM_RECEIVED)
+
+
+def test_claim_skips_the_delay_check_when_funded_at_is_missing(monkeypatch):
+    """A row with Funded=TRUE but no FundedAt (old data from before this
+    column existed) shouldn't get permanently stuck - fail open rather
+    than blocking a legitimate claim over missing data."""
+    store = MagicMock()
+    store.find_by_chat_id.return_value = {
+        "_row": 9,
+        "ChatID": "444444",
+        "Funded": "TRUE",
+        "FundedAt": "",
+        "ClaimStatus": "",
+    }
+    store.is_true.side_effect = lambda row, col: str(row.get(col, "")).strip().upper() == "TRUE"
+    store.get_config.return_value = {"min_claim_delay_minutes": "15"}
+    context = MagicMock()
+    context.bot_data = {"store": store, "mod_group_chat_id": -100}
+    context.bot.send_message = AsyncMock()
+    update = _make_update(444444, "/claim")
+
+    asyncio.run(trader.claim(update, context))
+
+    store.update_cell.assert_called_once_with(9, "ClaimStatus", "REQUESTED")
+    update.message.reply_text.assert_awaited_once_with(messages.CLAIM_RECEIVED)
+
+
 def test_wallet_command_resends_guide_when_awaiting():
     """/wallet re-sends the acquisition steps to a linked, approved trader
     who hasn't submitted a wallet yet."""
@@ -436,6 +535,7 @@ def test_fund_action_writes_funded_at_and_computes_deadline(monkeypatch):
         "challenge_duration": "3 days",
         "challenge_duration_hours": "72",
         "guide_link": "https://example.com/guide",
+        "wallet_site_url": "testnet.example.com",
     }
     context = MagicMock()
     context.bot_data = {"store": store, "mod_group_chat_id": -100}
@@ -454,6 +554,9 @@ def test_fund_action_writes_funded_at_and_computes_deadline(monkeypatch):
     assert context.bot.send_message.call_args.kwargs["chat_id"] == 555
     assert "Sep 11" in sent_text
     assert "{deadline}" not in sent_text  # placeholder must actually get filled
+    # The funded message links straight to the trading site itself, not
+    # just the rules doc - traders kept not knowing where to actually trade.
+    assert "testnet.example.com" in sent_text
 
     edited_text = query.edit_message_text.call_args[0][0]
     assert "ends" in edited_text
@@ -479,6 +582,7 @@ def test_handle_button_looks_up_the_trader_by_chat_id_not_row_number():
         "challenge_duration": "3 days",
         "challenge_duration_hours": "72",
         "guide_link": "https://example.com/guide",
+        "wallet_site_url": "testnet.example.com",
     }
     context = MagicMock()
     context.bot_data = {"store": store, "mod_group_chat_id": -100}
@@ -556,6 +660,7 @@ def test_fund_action_warns_on_late_week_funding(monkeypatch):
         "challenge_duration": "3 days",
         "challenge_duration_hours": "72",
         "guide_link": "https://example.com/guide",
+        "wallet_site_url": "testnet.example.com",
     }
     context = MagicMock()
     context.bot_data = {"store": store, "mod_group_chat_id": -100}
@@ -596,6 +701,7 @@ def test_fund_action_edits_the_card_without_reparsing_markdown(monkeypatch):
         "challenge_duration": "3 days",
         "challenge_duration_hours": "72",
         "guide_link": "https://example.com/guide",
+        "wallet_site_url": "testnet.example.com",
     }
     context = MagicMock()
     context.bot_data = {"store": store, "mod_group_chat_id": -100}
@@ -693,6 +799,7 @@ def test_poll_backfills_funded_at_for_hand_ticked_rows(monkeypatch):
         "challenge_duration": "3 days",
         "challenge_duration_hours": "72",
         "guide_link": "https://example.com/guide",
+        "wallet_site_url": "testnet.example.com",
     }
     store.is_true.side_effect = lambda row, col: str(row.get(col, "")).strip().upper() == "TRUE"
     context = MagicMock()

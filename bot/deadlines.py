@@ -21,11 +21,11 @@ DEFAULT_DURATION_HOURS = 72.0
 _LATE_WEEKDAY_CUTOFF = 3  # Monday=0 ... Thursday=3
 
 
-def compute_deadline(funded_at_iso: str | None, duration_hours) -> datetime | None:
-    """Returns the UTC deadline for a row given its FundedAt timestamp and
-    the Config tab's challenge_duration_hours. Returns None if funded_at_iso
-    is blank or unparseable, so callers can treat the deadline as "unknown"
-    (e.g. a row funded before this feature existed) instead of crashing."""
+def _parse_funded_at(funded_at_iso: str | None) -> datetime | None:
+    """Shared parsing for a FundedAt cell value. Returns None if blank or
+    unparseable (e.g. a row funded before this column existed), so callers
+    can treat that as "unknown" instead of crashing. Always returns a
+    tz-aware UTC datetime."""
     if not funded_at_iso:
         return None
     try:
@@ -34,11 +34,33 @@ def compute_deadline(funded_at_iso: str | None, duration_hours) -> datetime | No
         return None
     if funded_at.tzinfo is None:
         funded_at = funded_at.replace(tzinfo=timezone.utc)
+    return funded_at
+
+
+def compute_deadline(funded_at_iso: str | None, duration_hours) -> datetime | None:
+    """Returns the UTC deadline for a row given its FundedAt timestamp and
+    the Config tab's challenge_duration_hours. Returns None if funded_at_iso
+    is blank or unparseable, so callers can treat the deadline as "unknown"
+    (e.g. a row funded before this feature existed) instead of crashing."""
+    funded_at = _parse_funded_at(funded_at_iso)
+    if funded_at is None:
+        return None
     try:
         hours = float(duration_hours)
     except (TypeError, ValueError):
         hours = DEFAULT_DURATION_HOURS
     return funded_at + timedelta(hours=hours)
+
+
+def time_since_funded(funded_at_iso: str | None, now: datetime) -> timedelta | None:
+    """How long ago a row's FundedAt was, relative to `now` (pass your own
+    so callers stay testable the same way as everything else here - see
+    claim_too_soon in bot/handlers/trader.py, the one caller). Returns None
+    if FundedAt is blank or unparseable."""
+    funded_at = _parse_funded_at(funded_at_iso)
+    if funded_at is None:
+        return None
+    return now - funded_at
 
 
 def format_deadline(deadline: datetime) -> str:

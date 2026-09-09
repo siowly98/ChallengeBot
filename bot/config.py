@@ -43,6 +43,13 @@ CONFIG_DEFAULTS = {
     # Applicants sheet - covers the case where they found the bot before
     # ever filling out the application (see EMAIL_NOT_FOUND in messages.py).
     "google_form_link": "https://your-form-link-here",
+    # Minimum time a trader must wait after being funded before /claim
+    # does anything - blocks the reflexive tap right after the funded
+    # message arrives (it's the message that tells them /claim exists),
+    # long before they could've plausibly reached the target balance.
+    # Doesn't verify they actually hit the target - that's still a manual
+    # mod check - it just filters out claims that are obviously too early.
+    "min_claim_delay_minutes": "15",
 }
 
 # Column layout in the worksheet. Row 1 must be a header row with exactly
