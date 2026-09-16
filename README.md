@@ -1,13 +1,32 @@
-# Avantis Challenge Bot
+# Veranta Challenge Bot
 
-Automates the Telegram side of running the Avantis Challenge: linking applicants
-to the bot, sending approval/wallet-request/guide messages automatically, and
+Automates the Telegram side of running the Veranta Challenge (formerly the
+Avantis Challenge - see the rebrand note below): linking applicants to the
+bot, sending approval/wallet-request/guide messages automatically, and
 giving mods a single group chat with tap-to-act buttons instead of manually
 DMing hundreds of people from a personal account.
 
 **What this bot does not do:** decide who's eligible, send the actual testnet
 USDC, or verify who won. Those stay human calls - the bot just carries every
 message so a mod doesn't have to manually find and DM each trader.
+
+## Rebrand notes (Avantis → Veranta)
+
+- **Bot name/username:** Telegram doesn't let code change this - a mod with
+  BotFather access has to do it manually. Message
+  [@BotFather](https://t.me/BotFather), send `/mybots`, pick this bot, then
+  **Edit Bot → Edit Name** for the display name and **Edit Bot → Edit
+  Username** for the `@handle` (must still end in "bot", e.g.
+  `VerantaChallengeBot`; only works if that username isn't taken). Old
+  `t.me/OldUsername` links stop working the moment the username changes,
+  so update anywhere that link is posted (pinned messages, the Google Form
+  confirmation text, etc.) at the same time.
+- **Mod contact link and testnet site:** both moved to the Config tab
+  (`Mod Contact Link`, `Wallet Site URL` - see the table below) specifically
+  so they don't need a code change or redeploy once the new Telegram group
+  and domain exist. They still default to the old Avantis-era values until
+  you fill in the new ones.
+- **Everything else** (bot copy, this README) already says "Veranta."
 
 ## How it works (high level)
 
@@ -50,14 +69,22 @@ these column headers (order doesn't matter, spelling does):
 
 ```
 Timestamp | Email Address | TelegramUsername | ChatID | Eligible | ApprovalSent |
-WalletAddress | Funded | FundedAt | GuideSent | ClaimStatus | ClaimInstructionsSent | Notes
+WalletAddress | Funded | FundedAt | GuideSent | LeaderboardInviteSent |
+ClaimStatus | ClaimRequestedAt | ClaimReminderSent | ClaimInstructionsSent | Notes
 ```
 
 If your Google Form responses already land in a sheet, just add the
 columns the bot manages (`TelegramUsername`, `ChatID`, `Eligible`,
 `ApprovalSent`, `WalletAddress`, `Funded`, `FundedAt`, `GuideSent`,
-`ClaimStatus`, `ClaimInstructionsSent`, `Notes`) to that same tab -
+`LeaderboardInviteSent`, `ClaimStatus`, `ClaimRequestedAt`,
+`ClaimReminderSent`, `ClaimInstructionsSent`, `Notes`) to that same tab -
 `Timestamp` and `Email Address` should already be there from the Form.
+
+**Upgrading an existing sheet:** `LeaderboardInviteSent`, `ClaimRequestedAt`,
+and `ClaimReminderSent` are new. Add all three to the header row before
+deploying this version - a missing required column makes the bot refuse to
+start with a `RuntimeError` naming it (same thing that happened when
+`FundedAt` was added).
 Note: `TelegramUsername` (bot-managed) is separate from any self-reported
 "Your Telegram @username" column your form already has - keep both.
 
@@ -108,6 +135,13 @@ doesn't require redeploying. Just make sure the new question's column
 header doesn't accidentally collide with one of the bot's own column
 names in `bot/config.py`'s `COLUMNS` list.
 
+**Mainnet EVM address.** Add a Form question asking for the wallet address
+they trade with on mainnet (so you can later check whether they actually
+came back and traded with real money) and name its sheet column
+`MainnetEVMAddress`. This is optional, not in `COLUMNS` - the bot doesn't
+require or act on it, it just shows up on `/check <row>` in the mod group
+if present, purely for your own tracking.
+
 ### 3. Give the bot access to the sheet (Google service account)
 
 1. In [Google Cloud Console](https://console.cloud.google.com/), create a
@@ -156,11 +190,15 @@ each of these keys:
 | `Start Amount` | `$5,000` |
 | `Target Amount` | `$10,000` |
 | `Prize Amount` | `$100` |
-| `Wallet Site URL` | `testnet.avantisfi.com` |
+| `Wallet Site URL` | `testnet.avantisfi.com` (update once the Veranta domain exists) |
 | `Guide Link` | link to your setup guide |
 | `Claim Instructions Link` | link to your prize-claim instructions |
 | `Google Form Link` | link to the Challenge application form |
 | `Min Claim Delay Minutes` | `15` |
+| `Mod Contact Link` | `https://t.me/AvantisChallenges/6/27` (update once the Veranta group/link exists) |
+| `Leaderboard Invite Delay Hours` | `48` |
+| `Leaderboard URL` | `https://avantis-traders-club.up.railway.app/` |
+| `Claim Reminder Delay Hours` | `24` |
 
 Key names aren't case-sensitive and ignore spacing (`Prize Amount`,
 `prize amount`, and `PRIZE_AMOUNT` all work) - use whatever's readable.
@@ -180,6 +218,13 @@ the message covers both).
 does deadline math with (`72`) - keep the two in sync by hand if you
 change the round length. There's no `Challenge Start Date` key anymore:
 see "Per-participant challenge deadline" below for why.
+
+`Mod Contact Link` and `Wallet Site URL` both default to the old
+Avantis-era values (see the rebrand note near the top) - update them here
+once the new Veranta group and domain exist, no code change needed.
+
+`Leaderboard Invite Delay Hours`, `Leaderboard URL`, and `Claim Reminder
+Delay Hours` are covered in their own sections below.
 
 `Min Claim Delay Minutes` blocks `/claim` for that many minutes after a
 trader gets funded - it exists because the funded message is also the
@@ -210,6 +255,35 @@ the same way "false claim" itself is a human judgment call. If you want
 an actual blacklist (e.g. a sheet column the bot checks before letting
 someone link, submit a wallet, or claim at all), that's a separate
 feature to build, not something this prompt does on its own.
+
+### Claim cards standing out, and the stale-claim reminder
+
+Claim cards look deliberately different from funding cards in the mod
+group - "🚨 CLAIM REQUEST - NEEDS REVIEW 🚨" instead of "💰 Wallet
+submitted" (`bot/mod_cards.py`) - because claim cards were getting missed
+among other traffic in the group.
+
+As a backstop for when a card still gets missed: if a claim sits with no
+Verify/Reject tap for longer than `Claim Reminder Delay Hours` (default
+24), the poll loop sends a follow-up nudge into the mod group naming the
+row, email, and username, once per claim (`ClaimReminderSent` prevents
+repeats). This uses `ClaimRequestedAt`, stamped the moment a claim is
+confirmed - not `FundedAt` and not when `/claim` was first typed (which
+might have been well before the confirmation prompt was tapped). A
+resubmitted claim (e.g. after a `REJECTED` one) resets both
+`ClaimRequestedAt` and `ClaimReminderSent`, so the 24h window restarts for
+the new claim rather than reusing whatever's left from the old one.
+
+### Weekly leaderboard invite
+
+Separately from this one-off challenge, `Leaderboard Invite Delay Hours`
+(default 48, i.e. 2 days) after someone gets funded, the poll loop DMs
+them an invite to a separate, ongoing weekly rolling leaderboard - top 3
+PnL win cash, plus 10 raffle spots (`LEADERBOARD_INVITE` in
+`bot/messages.py`, linking `Leaderboard URL`). This fires once per row
+(`LeaderboardInviteSent`) and doesn't depend on whether they've claimed
+anything on the challenge itself - it's about driving activity on the
+separate leaderboard, not a reward for completing this challenge.
 
 ### Per-participant challenge deadline
 

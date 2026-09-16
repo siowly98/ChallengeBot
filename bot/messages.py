@@ -13,11 +13,12 @@ computed per participant from their own FundedAt timestamp (see
 bot/deadlines.py), since the challenge clock starts when THEY get funded,
 not on a shared date. It's passed in as a render() extra by whichever
 handler sends that message (the Fund button in admin.py, or the poll
-loop in jobs.py for hand-ticked rows)."""
+loop in jobs.py for hand-ticked rows).
 
-# Where to send someone who needs a human - linked from every message that
-# tells a trader to "message a mod".
-CONTACT_LINK = "https://t.me/AvantisChallenges/6/27"
+{mod_contact_link} (every "message a mod" line) IS a Config value now,
+not a hardcoded constant - see mod_contact_link in bot/config.py. Any
+template using it must be sent through render(), even a message with no
+other placeholders."""
 
 
 def render(template: str, cfg: dict, **extra) -> str:
@@ -27,7 +28,7 @@ def render(template: str, cfg: dict, **extra) -> str:
     return template.format(**cfg, **extra)
 
 WELCOME = (
-    "Welcome to the Avantis Challenge bot! 👋\n\n"
+    "Welcome to the Veranta Challenge bot! 👋\n\n"
     "This is how we'll reach you with updates about your application - approval, "
     "your testnet funds, and your challenge results all come through this chat.\n\n"
     "Step 1: reply here with the *exact email address* you used on the application form.\n\n"
@@ -43,13 +44,13 @@ EMAIL_NOT_FOUND = (
     "Once you've submitted it, come back and send your email here again.\n\n"
     "Already applied? Double check it's typed exactly as you put it on the form (no extra spaces, "
     "correct capitalization isn't required but spelling is) and send it again.\n\n"
-    f"Still stuck after a couple tries? Message a mod directly for help: {CONTACT_LINK}"
+    "Still stuck after a couple tries? Message a mod directly for help: {mod_contact_link}"
 )
 
 DUPLICATE_EMAIL = (
     "That email is already linked to a different Telegram account.\n\n"
     "Each application can only be linked once. If this is your email and you think "
-    f"something's wrong, message a mod here: {CONTACT_LINK}"
+    "something's wrong, message a mod here: {mod_contact_link}"
 )
 
 DUPLICATE_WALLET = (
@@ -57,7 +58,7 @@ DUPLICATE_WALLET = (
     "Each wallet can only be used once - but you're not stuck. Just send a different "
     "wallet address here and we'll use that one instead. (If you logged in with the "
     "wrong account, log back in with the right one and copy that address.)\n\n"
-    f"Don't have another wallet, or think this is a mistake? Message a mod: {CONTACT_LINK}"
+    "Don't have another wallet, or think this is a mistake? Message a mod: {mod_contact_link}"
 )
 
 HELP = (
@@ -69,7 +70,7 @@ HELP = (
     "/help - show this message\n\n"
     "Once you're linked, you don't need to do anything else - we'll message you here "
     "at each step. No need to keep checking in.\n\n"
-    f"Need a human? Message a mod: {CONTACT_LINK}"
+    "Need a human? Message a mod: {mod_contact_link}"
 )
 
 LINK_SUCCESS_NOT_YET_REVIEWED = (
@@ -93,7 +94,7 @@ WALLET_GUIDE = (
 )
 
 APPROVAL_AND_WALLET_REQUEST = (
-    "Gmgm 👋 You've been selected for the Avantis {start_amount} → {target_amount} Challenge! 🎉\n\n"
+    "Gmgm 👋 You've been selected for the Veranta {start_amount} → {target_amount} Challenge! 🎉\n\n"
     "Your {challenge_duration} clock starts the moment we fund your wallet, not before - so there's no rush "
     "right now. You'll get {start_amount} in practice funds and have to reach {target_amount}+ to win "
     "{prize_amount}. Trade any asset, any leverage.\n\n"
@@ -119,7 +120,7 @@ WALLET_RECEIVED = (
 WALLET_SUBMIT_RETRY = (
     "Hmm, something went wrong on our end saving that and we couldn't log it properly. "
     "Nothing's lost - please send your wallet address here again in a moment.\n\n"
-    f"If it keeps failing, message a mod: {CONTACT_LINK}"
+    "If it keeps failing, message a mod: {mod_contact_link}"
 )
 
 INVALID_WALLET_FORMAT = (
@@ -139,9 +140,20 @@ FUNDED_AND_GUIDE = (
     "support and amplify it! 🫡"
 )
 
+# Sent by poll_sheet a few days after funding (see leaderboard_invite_delay_hours
+# in bot/config.py) - a separate, ongoing weekly leaderboard, distinct from
+# this one-off challenge. Not tied to whether they've claimed anything here.
+LEADERBOARD_INVITE = (
+    "One more thing 👀\n\n"
+    "While you're trading for the {challenge_duration} Challenge, you can also jump into our "
+    "weekly rolling leaderboard - top 3 PnL each week win cash, plus 10 raffle spots for "
+    "everyone else who's active.\n\n"
+    "Check it out here:\n{leaderboard_url}"
+)
+
 CLAIM_NOT_ELIGIBLE = (
     "We don't have you marked as funded yet, so there's nothing to claim yet. "
-    f"If you think this is a mistake, let a mod know: {CONTACT_LINK}"
+    "If you think this is a mistake, let a mod know: {mod_contact_link}"
 )
 
 # {wait} is a render() extra (like {deadline}), not a Config value - it's
@@ -170,7 +182,7 @@ CLAIM_RECEIVED = (
 CLAIM_SUBMIT_RETRY = (
     "Hmm, something went wrong on our end submitting that claim and we couldn't log it "
     "properly. Nothing's lost - please send /claim again in a moment.\n\n"
-    f"If it keeps failing, message a mod: {CONTACT_LINK}"
+    "If it keeps failing, message a mod: {mod_contact_link}"
 )
 
 CLAIM_ALREADY_SUBMITTED = (

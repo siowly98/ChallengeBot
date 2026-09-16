@@ -104,11 +104,14 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(f"{query.message.text}\n\n✅ Verified by {mod_name}")
 
     elif action == "reject":
+        cfg = await asyncio.to_thread(store.get_config)
         await asyncio.to_thread(store.update_cell, row["_row"], "ClaimStatus", "REJECTED")
         await context.bot.send_message(
             chat_id=chat_id,
-            text=messages.CLAIM_REJECTED.format(
-                reason=f"Message a mod if you have questions: {messages.CONTACT_LINK}"
+            text=messages.render(
+                messages.CLAIM_REJECTED,
+                cfg,
+                reason=f"Message a mod if you have questions: {cfg.get('mod_contact_link')}",
             ),
         )
         await query.edit_message_text(f"{query.message.text}\n\n❌ Rejected by {mod_name}")
@@ -176,6 +179,13 @@ async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Wallet on file: {'Yes' if row.get('WalletAddress') else 'No'}",
         f"Funded: {'Yes' if store.is_true(row, 'Funded') else 'No'}",
     ]
+
+    # Optional column - only shows once the Form question + sheet column
+    # for it exist (see README's "Mainnet EVM address" note). Blank for
+    # any row from before that was added.
+    mainnet_address = row.get("MainnetEVMAddress")
+    if mainnet_address:
+        lines.append(f"Mainnet EVM address: {mainnet_address}")
 
     if store.is_true(row, "Funded"):
         cfg = await asyncio.to_thread(store.get_config)

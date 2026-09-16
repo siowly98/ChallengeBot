@@ -13,7 +13,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from .. import messages
-from ..deadlines import compute_deadline, format_deadline, format_timedelta, time_since_funded
+from ..deadlines import compute_deadline, format_deadline, format_timedelta, elapsed_since_iso
 from ..mod_cards import claim_requested_card, wallet_submitted_card
 from ..sheets import SheetStore
 
@@ -63,7 +63,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(messages.HELP)
+    store = get_store(context)
+    cfg = await asyncio.to_thread(store.get_config)
+    await update.message.reply_text(messages.render(messages.HELP, cfg))
 
 
 async def wallet_guide(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -117,11 +119,12 @@ async def claim(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if row is None:
         await update.message.reply_text(messages.STATUS_UNLINKED)
         return
-    if not store.is_true(row, "Funded"):
-        await update.message.reply_text(messages.CLAIM_NOT_ELIGIBLE)
-        return
 
     cfg = await asyncio.to_thread(store.get_config)
+
+    if not store.is_true(row, "Funded"):
+        await update.message.reply_text(messages.render(messages.CLAIM_NOT_ELIGIBLE, cfg))
+        return
 
     # People tap /claim the moment the funded message arrives - it's the
     # same message that tells them /claim exists, and it's easy to tap
@@ -129,7 +132,7 @@ async def claim(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # still a manual mod check on the card below), it just filters out
     # claims that are obviously too early to be real - blocked before a
     # REQUESTED card ever gets created, so mods aren't seeing these at all.
-    elapsed = time_since_funded(row.get("FundedAt"), datetime.now(timezone.utc))
+    elapsed = elapsed_since_iso(row.get("FundedAt"), datetime.now(timezone.utc))
     if elapsed is not None:
         try:
             min_delay = timedelta(minutes=float(cfg.get("min_claim_delay_minutes", 15)))
@@ -197,7 +200,19 @@ async def handle_claim_confirmation(update: Update, context: ContextTypes.DEFAUL
         await query.answer()
         return
 
-    await asyncio.to_thread(store.update_cell, row["_row"], "ClaimStatus", "REQUESTED")
+    claim_requested_at = datetime.now(timezone.utc).isoformat()
+    await asyncio.to_thread(
+        store.update_cells,
+        row["_row"],
+        {
+            "ClaimStatus": "REQUESTED",
+            # Stamped fresh on every submission (including a resubmit after
+            # a REJECTED claim) so the 24h stale-claim reminder in
+            # poll_sheet always counts from THIS claim, not a previous one.
+            "ClaimRequestedAt": claim_requested_at,
+            "ClaimReminderSent": "",
+        },
+    )
     row["ClaimStatus"] = "REQUESTED"
     cfg = await asyncio.to_thread(store.get_config)
     text, card_keyboard = claim_requested_card(row, cfg)
@@ -207,8 +222,10 @@ async def handle_claim_confirmation(update: Update, context: ContextTypes.DEFAUL
     else:
         # Card never reached the mods - roll the status back so /claim works
         # again, instead of leaving a REQUESTED claim no mod can see or act on.
-        await asyncio.to_thread(store.update_cell, row["_row"], "ClaimStatus", "")
-        await query.edit_message_text(messages.CLAIM_SUBMIT_RETRY)
+        await asyncio.to_thread(
+            store.update_cells, row["_row"], {"ClaimStatus": "", "ClaimRequestedAt": ""}
+        )
+        await query.edit_message_text(messages.render(messages.CLAIM_SUBMIT_RETRY, cfg))
     await query.answer()
 
 
@@ -234,7 +251,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # trying to claim an application slot that's already linked to
             # a different Telegram account - block it rather than letting
             # a second account ride along on the same application.
-            await update.message.reply_text(messages.DUPLICATE_EMAIL)
+            cfg = await asyncio.to_thread(store.get_config)
+            await update.message.reply_text(messages.render(messages.DUPLICATE_EMAIL, cfg))
             return
 
         # Link ChatID + username, and (if already eligible) ApprovalSent -
@@ -278,7 +296,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if existing is not None and existing["_row"] != row["_row"]:
             # Same wallet already sitting on someone else's row - block it
             # rather than letting one wallet get funded twice.
-            await update.message.reply_text(messages.DUPLICATE_WALLET)
+            cfg = await asyncio.to_thread(store.get_config)
+            await update.message.reply_text(messages.render(messages.DUPLICATE_WALLET, cfg))
             return
 
         await asyncio.to_thread(store.update_cell, row["_row"], "WalletAddress", text)
@@ -294,7 +313,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # instead of being silently stuck with a wallet on file and no
             # fundable card (the exact stuck state we hit before).
             await asyncio.to_thread(store.update_cell, row["_row"], "WalletAddress", "")
-            await update.message.reply_text(messages.WALLET_SUBMIT_RETRY)
+            await update.message.reply_text(messages.render(messages.WALLET_SUBMIT_RETRY, cfg))
         return
 
     # Anything else that doesn't match a known state - point them at /status

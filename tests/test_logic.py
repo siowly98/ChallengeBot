@@ -156,13 +156,16 @@ def test_duplicate_email_is_blocked():
     store.find_by_chat_id.return_value = None
     store.find_by_email.return_value = {"_row": 5, "ChatID": "999999", "Eligible": "FALSE"}
     store.is_true.side_effect = lambda row, col: str(row.get(col, "")).strip().upper() == "TRUE"
+    store.get_config.return_value = {"mod_contact_link": "https://t.me/mods"}
     context = MagicMock()
     context.bot_data = {"store": store}
     update = _make_update(111111, "a@x.com")
 
     asyncio.run(trader.handle_text(update, context))
 
-    update.message.reply_text.assert_awaited_once_with(messages.DUPLICATE_EMAIL)
+    sent = update.message.reply_text.call_args[0][0]
+    assert "already linked to a different Telegram account" in sent
+    assert "https://t.me/mods" in sent
     store.update_cells.assert_not_called()
 
 
@@ -174,7 +177,10 @@ def test_unknown_email_gets_the_form_link():
     store = MagicMock()
     store.find_by_chat_id.return_value = None
     store.find_by_email.return_value = None
-    store.get_config.return_value = {"google_form_link": "https://forms.example.com/challenge"}
+    store.get_config.return_value = {
+        "google_form_link": "https://forms.example.com/challenge",
+        "mod_contact_link": "https://t.me/mods",
+    }
     context = MagicMock()
     context.bot_data = {"store": store}
     update = _make_update(111111, "notonlist@x.com")
@@ -197,13 +203,16 @@ def test_duplicate_wallet_is_blocked():
     }
     store.is_true.side_effect = lambda row, col: str(row.get(col, "")).strip().upper() == "TRUE"
     store.find_by_wallet.return_value = {"_row": 42, "WalletAddress": "0x" + "a" * 40}
+    store.get_config.return_value = {"mod_contact_link": "https://t.me/mods"}
     context = MagicMock()
     context.bot_data = {"store": store}
     update = _make_update(222222, "0x" + "a" * 40)
 
     asyncio.run(trader.handle_text(update, context))
 
-    update.message.reply_text.assert_awaited_once_with(messages.DUPLICATE_WALLET)
+    sent = update.message.reply_text.call_args[0][0]
+    assert "already registered under a different application" in sent
+    assert "https://t.me/mods" in sent
     store.update_cell.assert_not_called()
 
 
@@ -245,6 +254,7 @@ def test_wallet_card_failure_rolls_back_the_write(monkeypatch):
     }
     store.is_true.side_effect = lambda row, col: str(row.get(col, "")).strip().upper() == "TRUE"
     store.find_by_wallet.return_value = None
+    store.get_config.return_value = {"mod_contact_link": "https://t.me/mods"}
     context = MagicMock()
     context.bot_data = {"store": store, "mod_group_chat_id": -100}
     context.bot.send_message = AsyncMock(side_effect=RuntimeError("mod group unreachable"))
@@ -252,7 +262,9 @@ def test_wallet_card_failure_rolls_back_the_write(monkeypatch):
 
     asyncio.run(trader.handle_text(update, context))
 
-    update.message.reply_text.assert_awaited_once_with(messages.WALLET_SUBMIT_RETRY)
+    sent = update.message.reply_text.call_args[0][0]
+    assert "Nothing's lost" in sent
+    assert "https://t.me/mods" in sent
     # The wallet was written, then rolled back to "" - both writes present.
     writes = [c.args for c in store.update_cell.call_args_list]
     assert (7, "WalletAddress", "0x" + "a" * 40) in writes
@@ -318,7 +330,11 @@ def test_claim_confirmation_posts_the_card(monkeypatch):
 
     asyncio.run(trader.handle_claim_confirmation(update, context))
 
-    store.update_cell.assert_called_once_with(9, "ClaimStatus", "REQUESTED")
+    store.update_cells.assert_called_once()
+    write_row, write_data = store.update_cells.call_args[0]
+    assert write_row == 9
+    assert write_data["ClaimStatus"] == "REQUESTED"
+    assert "ClaimRequestedAt" in write_data
     context.bot.send_message.assert_awaited_once()
     query.edit_message_text.assert_awaited_once_with(messages.CLAIM_RECEIVED)
 
@@ -330,7 +346,7 @@ def test_claim_confirmation_card_failure_rolls_back_the_status(monkeypatch):
     store = MagicMock()
     store.find_by_chat_id.return_value = {"_row": 9, "ChatID": "444444", "Funded": "TRUE", "ClaimStatus": ""}
     store.is_true.side_effect = lambda row, col: str(row.get(col, "")).strip().upper() == "TRUE"
-    store.get_config.return_value = {"challenge_duration_hours": "72"}
+    store.get_config.return_value = {"challenge_duration_hours": "72", "mod_contact_link": "https://t.me/mods"}
     context = MagicMock()
     context.bot_data = {"store": store, "mod_group_chat_id": -100}
     context.bot.send_message = AsyncMock(side_effect=RuntimeError("mod group unreachable"))
@@ -338,10 +354,13 @@ def test_claim_confirmation_card_failure_rolls_back_the_status(monkeypatch):
 
     asyncio.run(trader.handle_claim_confirmation(update, context))
 
-    query.edit_message_text.assert_awaited_once_with(messages.CLAIM_SUBMIT_RETRY)
-    writes = [c.args for c in store.update_cell.call_args_list]
-    assert (9, "ClaimStatus", "REQUESTED") in writes
-    assert writes[-1] == (9, "ClaimStatus", "")  # rollback is the last write
+    sent = query.edit_message_text.call_args[0][0]
+    assert "Nothing's lost" in sent
+    assert "https://t.me/mods" in sent
+    writes = [c.args for c in store.update_cells.call_args_list]
+    assert writes[0][0] == 9
+    assert writes[0][1]["ClaimStatus"] == "REQUESTED"
+    assert writes[-1] == (9, {"ClaimStatus": "", "ClaimRequestedAt": ""})  # rollback is the last write
 
 
 def test_claim_cancel_writes_nothing():

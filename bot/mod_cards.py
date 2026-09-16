@@ -83,8 +83,14 @@ def claim_requested_card(row: dict, cfg: dict):
                 f"⏰ Deadline: {format_deadline(deadline)} - {format_timedelta(deadline - now)} left when claimed\n"
             )
 
+    # Distinct header/framing from wallet_submitted_card on purpose - claim
+    # cards were getting missed/lost in the mod group among everything
+    # else. 🚨 + all-caps + "NEEDS REVIEW" is deliberately louder than the
+    # funding card. If this one sits too long, poll_sheet also sends a
+    # follow-up reminder into the group - see claim_reminder_delay_hours
+    # in bot/config.py.
     text = (
-        f"🏆 *Claim submitted*\n"
+        f"🚨 *CLAIM REQUEST - NEEDS REVIEW* 🚨\n"
         f"Email: {_md(row.get('Email Address'))}\n"
         f"Telegram: @{_md(row.get('TelegramUsername') or '-')}\n"
         f"Wallet: `{row.get('WalletAddress')}`\n"

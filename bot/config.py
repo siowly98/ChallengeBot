@@ -50,10 +50,27 @@ CONFIG_DEFAULTS = {
     # Doesn't verify they actually hit the target - that's still a manual
     # mod check - it just filters out claims that are obviously too early.
     "min_claim_delay_minutes": "15",
+    # Where every "message a mod" line in trader-facing copy points.
+    # Placeholder is the old Avantis group - update this in the Config tab
+    # once the new Veranta group/link exists, no redeploy needed.
+    "mod_contact_link": "https://t.me/AvantisChallenges/6/27",
+    # How long after funding to invite someone to the separate weekly
+    # rolling leaderboard (top-3 PnL cash + raffles) - see LEADERBOARD_INVITE
+    # in messages.py and poll_sheet in jobs.py.
+    "leaderboard_invite_delay_hours": "48",
+    "leaderboard_url": "https://avantis-traders-club.up.railway.app/",
+    # How long a claim can sit with no Verify/Reject tap before the mod
+    # group gets a reminder nudge - see poll_sheet in jobs.py.
+    "claim_reminder_delay_hours": "24",
 }
 
 # Column layout in the worksheet. Row 1 must be a header row with exactly
 # these names (any order - the bot looks columns up by header, not position).
+#
+# LeaderboardInviteSent, ClaimRequestedAt, and ClaimReminderSent are new -
+# if you're upgrading an existing sheet, add these three columns to the
+# header row BEFORE deploying this version, or the bot will refuse to
+# start (same RuntimeError FundedAt caused when that one was added).
 COLUMNS = [
     "Timestamp",
     "Email Address",
@@ -65,7 +82,10 @@ COLUMNS = [
     "Funded",
     "FundedAt",         # ISO UTC timestamp, written when a mod clicks Fund - the challenge clock starts here
     "GuideSent",
+    "LeaderboardInviteSent",  # TRUE once the weekly-leaderboard invite has gone out for this row
     "ClaimStatus",       # "", "REQUESTED", "VERIFIED", "REJECTED"
+    "ClaimRequestedAt",  # ISO UTC timestamp, stamped when a claim is confirmed - used for the 24h stale-claim reminder
+    "ClaimReminderSent",  # TRUE once the mod group has been nudged about a stale REQUESTED claim
     "ClaimInstructionsSent",
     "Notes",
 ]

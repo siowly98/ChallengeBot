@@ -11,9 +11,19 @@ from datetime import datetime, timezone
 from telegram.ext import ContextTypes
 
 from . import messages
-from .deadlines import compute_deadline, format_deadline
+from .deadlines import compute_deadline, format_deadline, elapsed_since_iso
 
 logger = logging.getLogger(__name__)
+
+
+def _hours(cfg: dict, key: str, default: float) -> float:
+    """Reads a Config tab hours value, falling back to `default` if it's
+    missing or not a real number - same fail-open approach as
+    challenge_duration_hours elsewhere."""
+    try:
+        return float(cfg.get(key, default))
+    except (TypeError, ValueError):
+        return default
 
 
 async def poll_sheet(context: ContextTypes.DEFAULT_TYPE):
@@ -24,6 +34,10 @@ async def poll_sheet(context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         logger.exception("Failed to read sheet during poll")
         return
+
+    now = datetime.now(timezone.utc)
+    leaderboard_delay = _hours(cfg, "leaderboard_invite_delay_hours", 48.0)
+    claim_reminder_delay = _hours(cfg, "claim_reminder_delay_hours", 24.0)
 
     for row in rows:
         chat_id = row.get("ChatID")
@@ -52,5 +66,48 @@ async def poll_sheet(context: ContextTypes.DEFAULT_TYPE):
                     text=messages.render(messages.FUNDED_AND_GUIDE, cfg, deadline=deadline_str),
                 )
                 await asyncio.to_thread(store.update_cell, row["_row"], "GuideSent", "TRUE")
+
+            # Invite to the separate weekly leaderboard a couple of days
+            # after funding - unrelated to whether they've claimed
+            # anything on this challenge, so it's independent of GuideSent.
+            if (
+                store.is_true(row, "Funded")
+                and not store.is_true(row, "LeaderboardInviteSent")
+                and row.get("FundedAt")
+            ):
+                elapsed = elapsed_since_iso(row.get("FundedAt"), now)
+                if elapsed is not None and elapsed.total_seconds() >= leaderboard_delay * 3600:
+                    await context.bot.send_message(
+                        chat_id=int(chat_id), text=messages.render(messages.LEADERBOARD_INVITE, cfg)
+                    )
+                    await asyncio.to_thread(store.update_cell, row["_row"], "LeaderboardInviteSent", "TRUE")
+
+            # Nudge the mod group about a claim that's sat unattended (no
+            # Verify/Reject tap) for too long - the claim card itself is
+            # already louder (see mod_cards.claim_requested_card), this is
+            # the backstop for when it still gets missed. elapsed_since_iso
+            # is a generic "how long ago was this ISO timestamp" helper
+            # despite the name - reused here for ClaimRequestedAt.
+            if (
+                row.get("ClaimStatus") == "REQUESTED"
+                and not store.is_true(row, "ClaimReminderSent")
+                and row.get("ClaimRequestedAt")
+            ):
+                elapsed = elapsed_since_iso(row.get("ClaimRequestedAt"), now)
+                if elapsed is not None and elapsed.total_seconds() >= claim_reminder_delay * 3600:
+                    # No parse_mode - the email/username below are plugged
+                    # in unescaped, and a bare underscore in either would
+                    # break a Markdown-parsed send (the exact bug class
+                    # fixed in admin.py's card edits - see its comments).
+                    await context.bot.send_message(
+                        chat_id=context.bot_data["mod_group_chat_id"],
+                        text=(
+                            f"⏰ Unattended claim - row {row['_row']}, "
+                            f"{row.get('Email Address') or '-'} (@{row.get('TelegramUsername') or '-'}) "
+                            f"has been waiting on Verify/Reject for over {int(claim_reminder_delay)}h. "
+                            f"Use /check {row['_row']} or scroll up to find the card."
+                        ),
+                    )
+                    await asyncio.to_thread(store.update_cell, row["_row"], "ClaimReminderSent", "TRUE")
         except Exception:
             logger.exception("Failed processing row %s during poll", row.get("_row"))

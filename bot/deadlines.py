@@ -21,20 +21,20 @@ DEFAULT_DURATION_HOURS = 72.0
 _LATE_WEEKDAY_CUTOFF = 3  # Monday=0 ... Thursday=3
 
 
-def _parse_funded_at(funded_at_iso: str | None) -> datetime | None:
-    """Shared parsing for a FundedAt cell value. Returns None if blank or
-    unparseable (e.g. a row funded before this column existed), so callers
-    can treat that as "unknown" instead of crashing. Always returns a
-    tz-aware UTC datetime."""
-    if not funded_at_iso:
+def _parse_iso_utc(timestamp_iso: str | None) -> datetime | None:
+    """Shared parsing for an ISO UTC timestamp cell (FundedAt,
+    ClaimRequestedAt, ...). Returns None if blank or unparseable (e.g. a
+    row from before that column existed), so callers can treat that as
+    "unknown" instead of crashing. Always returns a tz-aware UTC datetime."""
+    if not timestamp_iso:
         return None
     try:
-        funded_at = datetime.fromisoformat(funded_at_iso)
+        parsed = datetime.fromisoformat(timestamp_iso)
     except ValueError:
         return None
-    if funded_at.tzinfo is None:
-        funded_at = funded_at.replace(tzinfo=timezone.utc)
-    return funded_at
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 def compute_deadline(funded_at_iso: str | None, duration_hours) -> datetime | None:
@@ -42,7 +42,7 @@ def compute_deadline(funded_at_iso: str | None, duration_hours) -> datetime | No
     the Config tab's challenge_duration_hours. Returns None if funded_at_iso
     is blank or unparseable, so callers can treat the deadline as "unknown"
     (e.g. a row funded before this feature existed) instead of crashing."""
-    funded_at = _parse_funded_at(funded_at_iso)
+    funded_at = _parse_iso_utc(funded_at_iso)
     if funded_at is None:
         return None
     try:
@@ -52,15 +52,17 @@ def compute_deadline(funded_at_iso: str | None, duration_hours) -> datetime | No
     return funded_at + timedelta(hours=hours)
 
 
-def time_since_funded(funded_at_iso: str | None, now: datetime) -> timedelta | None:
-    """How long ago a row's FundedAt was, relative to `now` (pass your own
-    so callers stay testable the same way as everything else here - see
-    claim_too_soon in bot/handlers/trader.py, the one caller). Returns None
-    if FundedAt is blank or unparseable."""
-    funded_at = _parse_funded_at(funded_at_iso)
-    if funded_at is None:
+def elapsed_since_iso(timestamp_iso: str | None, now: datetime) -> timedelta | None:
+    """How long ago an ISO UTC timestamp was, relative to `now` (pass your
+    own so callers stay testable the same way as everything else here).
+    Generic - used for FundedAt (the /claim delay check in
+    bot/handlers/trader.py) and for ClaimRequestedAt (the stale-claim
+    reminder in bot/jobs.py) alike. Returns None if the timestamp is blank
+    or unparseable."""
+    parsed = _parse_iso_utc(timestamp_iso)
+    if parsed is None:
         return None
-    return now - funded_at
+    return now - parsed
 
 
 def format_deadline(deadline: datetime) -> str:
