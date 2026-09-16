@@ -72,7 +72,7 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text=messages.render(messages.FUNDED_AND_GUIDE, cfg, deadline=deadline_str),
         )
         note = f"\n\n✅ Funded by {mod_name} - ends {deadline_str}"
-        if funded_late_in_week(funded_at):
+        if funded_late_in_week(funded_at, cfg.get("challenge_duration_hours")):
             # Display-only nudge - mods still decide, nothing here blocks
             # funding on a Thursday/Friday/weekend.
             note += "\n⚠️ Funded Thu-Sun - this window will include a weekend day"

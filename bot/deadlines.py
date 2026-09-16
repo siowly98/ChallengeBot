@@ -16,9 +16,14 @@ from datetime import datetime, timedelta, timezone
 
 DEFAULT_DURATION_HOURS = 72.0
 
-# Funding on Monday, Tuesday or Wednesday keeps a 3-day (72h) window
-# entirely on weekdays. Thursday onward starts pulling in a weekend day.
-_LATE_WEEKDAY_CUTOFF = 3  # Monday=0 ... Thursday=3
+
+def _resolve_hours(duration_hours) -> float:
+    """Shared parsing for a Config tab hours value (challenge_duration_hours),
+    falling back to the 72h default if it's missing or not a real number."""
+    try:
+        return float(duration_hours)
+    except (TypeError, ValueError):
+        return DEFAULT_DURATION_HOURS
 
 
 def _parse_iso_utc(timestamp_iso: str | None) -> datetime | None:
@@ -45,11 +50,7 @@ def compute_deadline(funded_at_iso: str | None, duration_hours) -> datetime | No
     funded_at = _parse_iso_utc(funded_at_iso)
     if funded_at is None:
         return None
-    try:
-        hours = float(duration_hours)
-    except (TypeError, ValueError):
-        hours = DEFAULT_DURATION_HOURS
-    return funded_at + timedelta(hours=hours)
+    return funded_at + timedelta(hours=_resolve_hours(duration_hours))
 
 
 def elapsed_since_iso(timestamp_iso: str | None, now: datetime) -> timedelta | None:
@@ -69,10 +70,29 @@ def format_deadline(deadline: datetime) -> str:
     return deadline.strftime("%a %b %d, %H:%M UTC")
 
 
-def funded_late_in_week(funded_at: datetime) -> bool:
-    """True if funding at this moment means the challenge window will
-    likely include a weekend day - a heads-up for mods, never enforced."""
-    return funded_at.weekday() >= _LATE_WEEKDAY_CUTOFF
+def funded_late_in_week(funded_at: datetime, duration_hours) -> bool:
+    """True if the challenge window (funded_at through funded_at +
+    duration_hours) includes any Saturday or Sunday - a heads-up for mods,
+    never enforced. Duration-aware on purpose: a fixed "funded Thu-Sun"
+    cutoff only makes sense for a ~3-day window. A 5-day-or-longer window
+    crosses a weekend almost regardless of which day it starts, so this
+    checks the actual span instead of assuming a duration - it stays
+    correct no matter what challenge_duration_hours is set to in the
+    Config tab."""
+    hours = _resolve_hours(duration_hours)
+    deadline = funded_at + timedelta(hours=hours)
+    # Half-open interval [funded_at, deadline) - a deadline landing exactly
+    # at midnight shouldn't count that calendar day, since none of it is
+    # actually inside the window (e.g. Wed 00:00 + 72h = Sat 00:00 on the
+    # dot - the window closes the instant Saturday begins, so it never
+    # actually includes any Saturday trading time).
+    day = funded_at.date()
+    end = (deadline - timedelta(microseconds=1)).date()
+    while day <= end:
+        if day.weekday() >= 5:  # Saturday=5, Sunday=6
+            return True
+        day += timedelta(days=1)
+    return False
 
 
 def format_timedelta(delta: timedelta) -> str:

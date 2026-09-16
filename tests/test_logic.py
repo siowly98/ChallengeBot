@@ -632,10 +632,18 @@ def test_compute_deadline_falls_back_to_default_hours_on_bad_config():
 
 
 def test_funded_late_in_week():
-    assert not funded_late_in_week(datetime(2026, 9, 8, tzinfo=timezone.utc))  # Tuesday
-    assert not funded_late_in_week(datetime(2026, 9, 9, tzinfo=timezone.utc))  # Wednesday
-    assert funded_late_in_week(datetime(2026, 9, 10, tzinfo=timezone.utc))  # Thursday
-    assert funded_late_in_week(datetime(2026, 9, 13, tzinfo=timezone.utc))  # Sunday
+    """Duration-aware: checks whether the actual funded_at -> deadline span
+    includes a Saturday/Sunday, not a hardcoded weekday cutoff - so it stays
+    correct at any challenge_duration_hours, not just the old 72h default."""
+    # 72h (3-day) window - only Thu-Sun starts pull in a weekend.
+    assert not funded_late_in_week(datetime(2026, 9, 8, tzinfo=timezone.utc), 72)  # Tuesday
+    assert not funded_late_in_week(datetime(2026, 9, 9, tzinfo=timezone.utc), 72)  # Wednesday
+    assert funded_late_in_week(datetime(2026, 9, 10, tzinfo=timezone.utc), 72)  # Thursday
+    assert funded_late_in_week(datetime(2026, 9, 13, tzinfo=timezone.utc), 72)  # Sunday
+
+    # 120h (5-day) window - long enough to cross a weekend even from a
+    # Tuesday start, which a 72h window would clear.
+    assert funded_late_in_week(datetime(2026, 9, 8, tzinfo=timezone.utc), 120)  # Tuesday
 
 
 def test_fund_action_writes_funded_at_and_computes_deadline(monkeypatch):
