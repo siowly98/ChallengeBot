@@ -191,6 +191,7 @@ each of these keys:
 | `Target Amount` | `$10,000` |
 | `Prize Amount` | `$100` |
 | `Wallet Site URL` | `testnet.avantisfi.com` (update once the Veranta domain exists) |
+| `Withdrawal Address` | `0xBB4aD384eA26d0Ea59d01c9DB78D096b8e22b802` |
 | `Guide Link` | link to your setup guide |
 | `Claim Instructions Link` | link to your prize-claim instructions |
 | `Google Form Link` | link to the Challenge application form |
@@ -213,6 +214,24 @@ isn't on the Applicants sheet - covers someone who found the bot before
 ever filling out the form (as opposed to someone who already applied and
 just mistyped their email; the bot can't tell those two cases apart, so
 the message covers both).
+
+`Withdrawal Address` is shown to every trader the moment they submit a
+wallet (`WALLET_RECEIVED`), asking them to send back any leftover testnet
+USDC before being funded. This exists because a repeat entrant's wallet
+can still hold a balance from a previous round - funding them a fresh
+`Start Amount` on top of that would let them start above the intended
+balance, which isn't fair to everyone else starting from scratch. It's
+shown unconditionally (not just to repeat entrants) since the bot has no
+reliable way to tell who's reusing a wallet from before - first-timers
+just see an instruction that doesn't apply to them.
+
+The same message states the disqualification consequence: a wallet that
+didn't start at exactly `Start Amount` gets disqualified even if the
+trader hit the target. **This is a stated policy only** - like the
+blacklist warning on `/claim`, the bot doesn't verify starting balances
+itself (no on-chain polling exists anywhere in this codebase). Checking a
+wallet's actual starting balance and enforcing this is a manual step for
+whoever reviews the claim, same as verifying the target was genuinely hit.
 
 `Challenge Duration` is just the wording used in trader-facing copy
 ("3 days"). `Challenge Duration Hours` is the number the bot actually

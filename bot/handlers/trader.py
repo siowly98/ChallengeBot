@@ -306,7 +306,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         card_text, keyboard = wallet_submitted_card(row, cfg)
 
         if await _post_mod_card(context, card_text, keyboard):
-            await update.message.reply_text(messages.WALLET_RECEIVED)
+            await update.message.reply_text(messages.render(messages.WALLET_RECEIVED, cfg))
         else:
             # Card never reached the mods - roll the wallet write back so the
             # row returns to "awaiting wallet" and the trader can just resend,

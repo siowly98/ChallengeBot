@@ -37,6 +37,12 @@ CONFIG_DEFAULTS = {
     "target_amount": "$10,000",
     "prize_amount": "$100",
     "wallet_site_url": "testnet.avantisfi.com",
+    # Where a trader sends back any leftover testnet USDC before being
+    # funded - a repeat entrant's wallet can still hold a balance from a
+    # previous round, which would let them start this round with more than
+    # start_amount (unfair to everyone else). Shown in WALLET_RECEIVED,
+    # right after they submit a wallet - see messages.py.
+    "withdrawal_address": "0xBB4aD384eA26d0Ea59d01c9DB78D096b8e22b802",
     "guide_link": "https://your-doc-link-here/setup-guide",
     "claim_instructions_link": "https://your-doc-link-here/claim-instructions",
     # Shown when someone messages the bot with an email that's not in the

@@ -229,6 +229,11 @@ def test_resubmitting_own_wallet_is_not_blocked():
     }
     store.is_true.side_effect = lambda row, col: str(row.get(col, "")).strip().upper() == "TRUE"
     store.find_by_wallet.return_value = {"_row": 7, "WalletAddress": "0x" + "a" * 40}
+    store.get_config.return_value = {
+        "start_amount": "$5,000",
+        "wallet_site_url": "testnet.example.com",
+        "withdrawal_address": "0xBB4aD384eA26d0Ea59d01c9DB78D096b8e22b802",
+    }
     context = MagicMock()
     context.bot_data = {"store": store, "mod_group_chat_id": -100}
     context.bot.send_message = AsyncMock()
@@ -236,7 +241,9 @@ def test_resubmitting_own_wallet_is_not_blocked():
 
     asyncio.run(trader.handle_text(update, context))
 
-    update.message.reply_text.assert_awaited_once_with(messages.WALLET_RECEIVED)
+    sent = update.message.reply_text.call_args[0][0]
+    assert "Thanks, we've got your wallet address" in sent
+    assert "0xBB4aD384eA26d0Ea59d01c9DB78D096b8e22b802" in sent
 
 
 def test_wallet_card_failure_rolls_back_the_write(monkeypatch):

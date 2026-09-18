@@ -113,8 +113,18 @@ WALLET_ALREADY_ON_FILE = (
 )
 
 WALLET_RECEIVED = (
-    "Thanks, we've got your wallet address. We'll send your testnet funds shortly "
-    "and message you here once it's done."
+    "Thanks, we've got your wallet address.\n\n"
+    "⚠️ One thing before we fund you: if this wallet has any leftover testnet "
+    "USDC from a previous round, withdraw all of it first - otherwise you'd "
+    "start this round with more than {start_amount}, which isn't fair to "
+    "everyone else.\n\n"
+    "To withdraw: go to {wallet_site_url}, click your wallet address in the "
+    "top-right corner, then Withdraw → Transfer, and send it to:\n"
+    "{withdrawal_address}\n\n"
+    "We check starting balances - if yours didn't start at exactly "
+    "{start_amount}, you'll be disqualified even if you hit the target, no "
+    "exceptions.\n\n"
+    "We'll send your fresh funds shortly and message you here once it's done."
 )
 
 WALLET_SUBMIT_RETRY = (
