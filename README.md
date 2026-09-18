@@ -198,6 +198,7 @@ each of these keys:
 | `Mod Contact Link` | `https://t.me/AvantisChallenges/6/27` (update once the Veranta group/link exists) |
 | `Leaderboard Invite Delay Hours` | `48` |
 | `Leaderboard URL` | `https://avantis-traders-club.up.railway.app/` |
+| `Leaderboard Invite Enabled` | `TRUE` |
 | `Claim Reminder Delay Hours` | `24` |
 
 Key names aren't case-sensitive and ignore spacing (`Prize Amount`,
@@ -223,8 +224,9 @@ see "Per-participant challenge deadline" below for why.
 Avantis-era values (see the rebrand note near the top) - update them here
 once the new Veranta group and domain exist, no code change needed.
 
-`Leaderboard Invite Delay Hours`, `Leaderboard URL`, and `Claim Reminder
-Delay Hours` are covered in their own sections below.
+`Leaderboard Invite Delay Hours`, `Leaderboard URL`, `Leaderboard Invite
+Enabled`, and `Claim Reminder Delay Hours` are covered in their own
+sections below.
 
 `Min Claim Delay Minutes` blocks `/claim` for that many minutes after a
 trader gets funded - it exists because the funded message is also the
@@ -284,6 +286,11 @@ PnL win cash, plus 10 raffle spots (`LEADERBOARD_INVITE` in
 (`LeaderboardInviteSent`) and doesn't depend on whether they've claimed
 anything on the challenge itself - it's about driving activity on the
 separate leaderboard, not a reward for completing this challenge.
+
+Set `Leaderboard Invite Enabled` to `FALSE` in the Config tab to stop
+this going out entirely (e.g. the leaderboard site isn't ready yet) -
+takes effect on the next poll, no redeploy. Defaults to `TRUE` if unset,
+so existing setups keep sending it unless you turn it off.
 
 ### Per-participant challenge deadline
 

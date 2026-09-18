@@ -59,6 +59,11 @@ CONFIG_DEFAULTS = {
     # in messages.py and poll_sheet in jobs.py.
     "leaderboard_invite_delay_hours": "48",
     "leaderboard_url": "https://avantis-traders-club.up.railway.app/",
+    # Kill switch for the leaderboard invite - set to FALSE in the Config
+    # tab to stop it going out entirely (e.g. while the leaderboard itself
+    # isn't ready yet), no redeploy needed. Defaults to TRUE so existing
+    # behavior is unchanged for anyone who doesn't set this.
+    "leaderboard_invite_enabled": "TRUE",
     # How long a claim can sit with no Verify/Reject tap before the mod
     # group gets a reminder nudge - see poll_sheet in jobs.py.
     "claim_reminder_delay_hours": "24",

@@ -12,6 +12,7 @@ from telegram.ext import ContextTypes
 
 from . import messages
 from .deadlines import compute_deadline, format_deadline, elapsed_since_iso
+from .sheets import _truthy
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,9 @@ async def poll_sheet(context: ContextTypes.DEFAULT_TYPE):
     now = datetime.now(timezone.utc)
     leaderboard_delay = _hours(cfg, "leaderboard_invite_delay_hours", 48.0)
     claim_reminder_delay = _hours(cfg, "claim_reminder_delay_hours", 24.0)
+    # Kill switch - see leaderboard_invite_enabled in config.py. Defaults to
+    # TRUE (on) when unset, so existing setups keep working unchanged.
+    leaderboard_invite_enabled = _truthy(cfg.get("leaderboard_invite_enabled", "TRUE"))
 
     for row in rows:
         chat_id = row.get("ChatID")
@@ -71,7 +75,8 @@ async def poll_sheet(context: ContextTypes.DEFAULT_TYPE):
             # after funding - unrelated to whether they've claimed
             # anything on this challenge, so it's independent of GuideSent.
             if (
-                store.is_true(row, "Funded")
+                leaderboard_invite_enabled
+                and store.is_true(row, "Funded")
                 and not store.is_true(row, "LeaderboardInviteSent")
                 and row.get("FundedAt")
             ):

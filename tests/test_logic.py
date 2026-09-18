@@ -946,6 +946,95 @@ def test_poll_backfills_funded_at_for_hand_ticked_rows(monkeypatch):
     assert "{deadline}" not in sent_text
 
 
+def test_poll_sends_leaderboard_invite_once_delay_has_passed(monkeypatch):
+    """Baseline happy path for the leaderboard invite: funded long enough
+    ago, not yet sent - poll_sheet sends it and marks LeaderboardInviteSent
+    so it never repeats."""
+    from bot import jobs
+
+    fixed_now = datetime(2026, 9, 10, 12, 0, tzinfo=timezone.utc)
+
+    class _FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed_now
+
+    monkeypatch.setattr(jobs, "datetime", _FixedDatetime)
+
+    funded_at = datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc)  # 48h ago
+    store = MagicMock()
+    store.all_rows.return_value = [
+        {
+            "_row": 4,
+            "ChatID": "888",
+            "Funded": "TRUE",
+            "FundedAt": funded_at.isoformat(),
+            "LeaderboardInviteSent": "",
+            "GuideSent": "TRUE",
+        }
+    ]
+    store.get_config.return_value = {
+        "leaderboard_url": "https://example.com/leaderboard",
+        "challenge_duration": "5 days",
+    }
+    store.is_true.side_effect = lambda row, col: str(row.get(col, "")).strip().upper() == "TRUE"
+    context = MagicMock()
+    context.bot_data = {"store": store}
+    context.bot.send_message = AsyncMock()
+
+    asyncio.run(jobs.poll_sheet(context))
+
+    context.bot.send_message.assert_awaited_once()
+    assert context.bot.send_message.call_args.kwargs["chat_id"] == 888
+    sent_text = context.bot.send_message.call_args.kwargs["text"]
+    assert "https://example.com/leaderboard" in sent_text
+    writes = [c.args for c in store.update_cell.call_args_list]
+    assert (4, "LeaderboardInviteSent", "TRUE") in writes
+
+
+def test_leaderboard_invite_kill_switch_suppresses_it(monkeypatch):
+    """leaderboard_invite_enabled=FALSE in the Config tab stops the invite
+    entirely, even for a row that's otherwise well past the delay - the
+    quick way to turn this off if the leaderboard itself isn't ready."""
+    from bot import jobs
+
+    fixed_now = datetime(2026, 9, 10, 12, 0, tzinfo=timezone.utc)
+
+    class _FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed_now
+
+    monkeypatch.setattr(jobs, "datetime", _FixedDatetime)
+
+    funded_at = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)  # well past 48h
+    store = MagicMock()
+    store.all_rows.return_value = [
+        {
+            "_row": 4,
+            "ChatID": "888",
+            "Funded": "TRUE",
+            "FundedAt": funded_at.isoformat(),
+            "LeaderboardInviteSent": "",
+            "GuideSent": "TRUE",
+        }
+    ]
+    store.get_config.return_value = {
+        "leaderboard_url": "https://example.com/leaderboard",
+        "leaderboard_invite_enabled": "FALSE",
+    }
+    store.is_true.side_effect = lambda row, col: str(row.get(col, "")).strip().upper() == "TRUE"
+    context = MagicMock()
+    context.bot_data = {"store": store}
+    context.bot.send_message = AsyncMock()
+
+    asyncio.run(jobs.poll_sheet(context))
+
+    context.bot.send_message.assert_not_called()
+    writes = [c.args for c in store.update_cell.call_args_list]
+    assert not any(w[1] == "LeaderboardInviteSent" for w in writes)
+
+
 def _make_command_update(chat_id):
     update = MagicMock()
     update.effective_chat.id = chat_id
