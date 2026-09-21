@@ -153,12 +153,31 @@ FUNDED_AND_GUIDE = (
 # Sent by poll_sheet a few days after funding (see leaderboard_invite_delay_hours
 # in bot/config.py) - a separate, ongoing weekly leaderboard, distinct from
 # this one-off challenge. Not tied to whether they've claimed anything here.
+#
+# Two variants, chosen in jobs.py based on whether
+# leaderboard_channel_invite_link is set in the Config tab:
+#
+#   - Not set (the default): LEADERBOARD_INVITE sends the leaderboard link
+#     straight to the trader.
+#   - Set: LEADERBOARD_INVITE_VIA_CHANNEL is sent instead - the DM only
+#     points them at the channel, not the leaderboard link itself. The
+#     leaderboard link belongs INSIDE the channel (pin it there, alongside
+#     an explanation of what the leaderboard is) so people join the channel
+#     to find out what it's about before ever seeing the link.
 LEADERBOARD_INVITE = (
     "One more thing 👀\n\n"
     "While you're trading for the {challenge_duration} Challenge, you can also jump into our "
     "weekly rolling leaderboard - top 3 PnL each week win cash, plus 10 raffle spots for "
     "everyone else who's active.\n\n"
     "Check it out here:\n{leaderboard_url}"
+)
+
+LEADERBOARD_INVITE_VIA_CHANNEL = (
+    "One more thing 👀\n\n"
+    "While you're trading for the {challenge_duration} Challenge, you can also try for extra "
+    "prizes on our weekly rolling leaderboard - top 3 PnL each week win cash, plus 10 raffle "
+    "spots for everyone else who's active.\n\n"
+    "Join the channel here for how it works and the leaderboard link:\n{leaderboard_channel_invite_link}"
 )
 
 CLAIM_NOT_ELIGIBLE = (

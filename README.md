@@ -69,22 +69,25 @@ these column headers (order doesn't matter, spelling does):
 
 ```
 Timestamp | Email Address | TelegramUsername | ChatID | Eligible | ApprovalSent |
-WalletAddress | Funded | FundedAt | GuideSent | LeaderboardInviteSent |
-ClaimStatus | ClaimRequestedAt | ClaimReminderSent | ClaimInstructionsSent | Notes
+WalletAddress | Funded | FundedAt | GuideSent | LeaderboardRegistered |
+LeaderboardInviteSent | ClaimStatus | ClaimRequestedAt | ClaimReminderSent |
+ClaimInstructionsSent | Notes
 ```
 
 If your Google Form responses already land in a sheet, just add the
 columns the bot manages (`TelegramUsername`, `ChatID`, `Eligible`,
 `ApprovalSent`, `WalletAddress`, `Funded`, `FundedAt`, `GuideSent`,
-`LeaderboardInviteSent`, `ClaimStatus`, `ClaimRequestedAt`,
-`ClaimReminderSent`, `ClaimInstructionsSent`, `Notes`) to that same tab -
-`Timestamp` and `Email Address` should already be there from the Form.
+`LeaderboardRegistered`, `LeaderboardInviteSent`, `ClaimStatus`,
+`ClaimRequestedAt`, `ClaimReminderSent`, `ClaimInstructionsSent`, `Notes`) to
+that same tab - `Timestamp` and `Email Address` should already be there
+from the Form.
 
-**Upgrading an existing sheet:** `LeaderboardInviteSent`, `ClaimRequestedAt`,
-and `ClaimReminderSent` are new. Add all three to the header row before
-deploying this version - a missing required column makes the bot refuse to
-start with a `RuntimeError` naming it (same thing that happened when
-`FundedAt` was added).
+**Upgrading an existing sheet:** `LeaderboardRegistered` is new. Add it to
+the header row before deploying this version - a missing required column
+makes the bot refuse to start with a `RuntimeError` naming it (same thing
+that happened when `FundedAt` was added). `LeaderboardInviteSent`,
+`ClaimRequestedAt`, and `ClaimReminderSent` were the previous round of
+additions.
 Note: `TelegramUsername` (bot-managed) is separate from any self-reported
 "Your Telegram @username" column your form already has - keep both.
 
@@ -198,8 +201,10 @@ each of these keys:
 | `Min Claim Delay Minutes` | `15` |
 | `Mod Contact Link` | `https://t.me/AvantisChallenges/6/27` (update once the Veranta group/link exists) |
 | `Leaderboard Invite Delay Hours` | `48` |
-| `Leaderboard URL` | `https://avantis-traders-club.up.railway.app/` |
+| `Leaderboard URL` | `https://veranta-challenges-leaderboard-production.up.railway.app/` |
 | `Leaderboard Invite Enabled` | `TRUE` |
+| `Leaderboard Registration Enabled` | `TRUE` |
+| `Leaderboard Channel Invite Link` | (leave blank until that channel exists) |
 | `Claim Reminder Delay Hours` | `24` |
 
 Key names aren't case-sensitive and ignore spacing (`Prize Amount`,
@@ -244,8 +249,9 @@ Avantis-era values (see the rebrand note near the top) - update them here
 once the new Veranta group and domain exist, no code change needed.
 
 `Leaderboard Invite Delay Hours`, `Leaderboard URL`, `Leaderboard Invite
-Enabled`, and `Claim Reminder Delay Hours` are covered in their own
-sections below.
+Enabled`, `Leaderboard Registration Enabled`, `Leaderboard Channel Invite
+Link`, and `Claim Reminder Delay Hours` are covered in their own sections
+below.
 
 `Min Claim Delay Minutes` blocks `/claim` for that many minutes after a
 trader gets funded - it exists because the funded message is also the
@@ -295,6 +301,35 @@ resubmitted claim (e.g. after a `REJECTED` one) resets both
 `ClaimRequestedAt` and `ClaimReminderSent`, so the 24h window restarts for
 the new claim rather than reusing whatever's left from the old one.
 
+### Leaderboard registration
+
+The moment someone gets funded here, the poll loop also registers their
+wallet on the separate Veranta Challenges Trading Leaderboard
+(`POST /api/wallets` on that leaderboard, via `bot/leaderboard.py`) - using
+the `WalletAddress` already on file in this sheet, so the trader is never
+asked to submit it a second time. This fires once per row
+(`LeaderboardRegistered`) and, deliberately, does **not** wait for
+`Leaderboard Invite Delay Hours` below: an unregistered wallet earns
+nothing on the leaderboard (its own eligibility gates hide any wallet with
+no real trading volume), so registering early is harmless, and it means
+whatever they trade shows up there from day one rather than only after the
+invite delay.
+
+Requires `LEADERBOARD_API_URL` and `LEADERBOARD_ADMIN_TOKEN` to be set as
+env vars (see `.env.example`) - `LEADERBOARD_ADMIN_TOKEN` is the
+leaderboard's own `ADMIN_TOKEN`. Leave either blank to run this bot with no
+leaderboard integration at all - registration is skipped silently, not an
+error, so upgrading to this version is safe even before the leaderboard
+side is set up. With both set, `Leaderboard Registration Enabled` (Config
+tab, defaults `TRUE`) is a second, code-free kill switch for just this
+feature, independent of the invite message below.
+
+A registration that fails (leaderboard briefly down, a handle already
+registered to a different wallet, etc.) is logged and left unset, so it's
+retried on the next poll instead of being silently lost - a handle
+conflict specifically won't resolve itself and needs a mod to fix the
+sheet or the leaderboard's own wallet registry by hand.
+
 ### Weekly leaderboard invite
 
 Separately from this one-off challenge, `Leaderboard Invite Delay Hours`
@@ -303,13 +338,31 @@ them an invite to a separate, ongoing weekly rolling leaderboard - top 3
 PnL win cash, plus 10 raffle spots (`LEADERBOARD_INVITE` in
 `bot/messages.py`, linking `Leaderboard URL`). This fires once per row
 (`LeaderboardInviteSent`) and doesn't depend on whether they've claimed
-anything on the challenge itself - it's about driving activity on the
-separate leaderboard, not a reward for completing this challenge.
+anything on the challenge itself, or on whether registration above has
+happened yet - it's about driving activity on the separate leaderboard,
+not a reward for completing this challenge.
 
 Set `Leaderboard Invite Enabled` to `FALSE` in the Config tab to stop
 this going out entirely (e.g. the leaderboard site isn't ready yet) -
 takes effect on the next poll, no redeploy. Defaults to `TRUE` if unset,
 so existing setups keep sending it unless you turn it off.
+
+If `Leaderboard Channel Invite Link` is set in the Config tab, the invite
+message goes through the channel instead of linking the leaderboard
+directly: it invites the trader to a separate Telegram channel/group and
+gives *that* link, not the leaderboard's URL
+(`LEADERBOARD_INVITE_VIA_CHANNEL` in `bot/messages.py`, in place of
+`LEADERBOARD_INVITE`). The leaderboard link itself belongs **inside** that
+channel - pin a message there explaining what the leaderboard is and
+linking to it - so people join and read about it before ever seeing the
+link, rather than the bot handing it straight to their DMs. Leave the key
+blank (the default) to keep sending the plain invite with the leaderboard
+link directly, no channel involved.
+
+This is a single standing Telegram invite link you create once (e.g. a
+group/channel with "unlimited" invite link usage) and paste in here - not
+a unique per-trader link, since a shared link covers "anyone who wants to
+try for prizes" without any new per-trader tracking.
 
 ### Per-participant challenge deadline
 
@@ -425,6 +478,7 @@ relink for the new round. That's expected, not a bug.
 bot/
   config.py          # env vars + sheet column schema
   sheets.py           # Google Sheet read/write wrapper (the "database")
+  leaderboard.py       # HTTP client for registering a wallet on the separate leaderboard
   messages.py         # all trader-facing copy
   mod_cards.py         # builds the inline-button cards posted to the mod group
   jobs.py              # poll loop - safety net for direct sheet edits

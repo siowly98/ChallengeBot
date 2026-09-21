@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 from telegram.ext import ContextTypes
 
-from . import messages
+from . import config, leaderboard, messages
 from .deadlines import compute_deadline, format_deadline, elapsed_since_iso
 from .sheets import _truthy
 
@@ -42,6 +42,16 @@ async def poll_sheet(context: ContextTypes.DEFAULT_TYPE):
     # Kill switch - see leaderboard_invite_enabled in config.py. Defaults to
     # TRUE (on) when unset, so existing setups keep working unchanged.
     leaderboard_invite_enabled = _truthy(cfg.get("leaderboard_invite_enabled", "TRUE"))
+    # Whether the leaderboard integration is wired up at all (env vars set)
+    # AND not turned off via the Config-tab kill switch. Checked once per
+    # poll cycle, outside the per-row loop, rather than letting every row
+    # hit LeaderboardNotConfigured individually - same result, no wasted
+    # work on an install that hasn't set this up.
+    leaderboard_registration_enabled = bool(
+        config.LEADERBOARD_API_URL
+        and config.LEADERBOARD_ADMIN_TOKEN
+        and _truthy(cfg.get("leaderboard_registration_enabled", "TRUE"))
+    )
 
     for row in rows:
         chat_id = row.get("ChatID")
@@ -71,9 +81,42 @@ async def poll_sheet(context: ContextTypes.DEFAULT_TYPE):
                 )
                 await asyncio.to_thread(store.update_cell, row["_row"], "GuideSent", "TRUE")
 
+            # Register the trader's wallet on the leaderboard as soon as
+            # they're funded - deliberately NOT gated behind
+            # leaderboard_delay above. An unregistered wallet earns nothing
+            # (the leaderboard's own eligibility gates hide zero-volume
+            # rows), so there's no downside to registering early, and it
+            # means any real trading they do shows up there from day one
+            # instead of only after the invite delay. Uses the wallet
+            # address already on file here - the trader is never asked for
+            # it again.
+            if (
+                leaderboard_registration_enabled
+                and store.is_true(row, "Funded")
+                and not store.is_true(row, "LeaderboardRegistered")
+                and row.get("WalletAddress")
+            ):
+                try:
+                    await asyncio.to_thread(
+                        leaderboard.register_wallet,
+                        row.get("TelegramUsername") or "",
+                        row["WalletAddress"],
+                    )
+                    await asyncio.to_thread(store.update_cell, row["_row"], "LeaderboardRegistered", "TRUE")
+                except Exception:
+                    # Left unset on failure (network blip, leaderboard
+                    # briefly down, handle conflict) so this retries on the
+                    # next poll instead of being silently lost forever.
+                    logger.exception(
+                        "Failed to register row %s on the leaderboard - will retry next poll",
+                        row.get("_row"),
+                    )
+
             # Invite to the separate weekly leaderboard a couple of days
             # after funding - unrelated to whether they've claimed
-            # anything on this challenge, so it's independent of GuideSent.
+            # anything on this challenge, so it's independent of GuideSent,
+            # and independent of the registration block above (registration
+            # can happen well before this fires).
             if (
                 leaderboard_invite_enabled
                 and store.is_true(row, "Funded")
@@ -82,9 +125,18 @@ async def poll_sheet(context: ContextTypes.DEFAULT_TYPE):
             ):
                 elapsed = elapsed_since_iso(row.get("FundedAt"), now)
                 if elapsed is not None and elapsed.total_seconds() >= leaderboard_delay * 3600:
-                    await context.bot.send_message(
-                        chat_id=int(chat_id), text=messages.render(messages.LEADERBOARD_INVITE, cfg)
-                    )
+                    # Channel-first when a channel link is configured: the DM
+                    # only points them at the channel, not the leaderboard
+                    # link directly - the link (and an explanation of what
+                    # the leaderboard is) lives inside the channel, so
+                    # joining it is the only way to reach the leaderboard.
+                    # Falls back to the plain direct-link message otherwise.
+                    channel_link = (cfg.get("leaderboard_channel_invite_link") or "").strip()
+                    if channel_link:
+                        invite_text = messages.render(messages.LEADERBOARD_INVITE_VIA_CHANNEL, cfg)
+                    else:
+                        invite_text = messages.render(messages.LEADERBOARD_INVITE, cfg)
+                    await context.bot.send_message(chat_id=int(chat_id), text=invite_text)
                     await asyncio.to_thread(store.update_cell, row["_row"], "LeaderboardInviteSent", "TRUE")
 
             # Nudge the mod group about a claim that's sat unattended (no

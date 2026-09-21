@@ -18,6 +18,23 @@ GOOGLE_CREDENTIALS_PATH = os.environ.get("GOOGLE_CREDENTIALS_PATH", "credentials
 MOD_GROUP_CHAT_ID = int(_require("MOD_GROUP_CHAT_ID"))
 POLL_INTERVAL_SECONDS = int(os.environ.get("POLL_INTERVAL_SECONDS", "30"))
 
+# Optional - wires this bot up to the separate Veranta Challenges Trading
+# Leaderboard so a trader's wallet gets registered there automatically once
+# they're funded here (see bot/leaderboard.py and the registration block in
+# jobs.py's poll_sheet). LEADERBOARD_API_URL is that leaderboard's base URL
+# (e.g. https://veranta-challenges-leaderboard-production.up.railway.app);
+# LEADERBOARD_ADMIN_TOKEN is the value of ITS OWN ADMIN_TOKEN env var, sent
+# as x-admin-token so the leaderboard's /api/wallets accepts the write.
+#
+# Both are secrets/infra config, so they're env vars here - not Config tab
+# values like leaderboard_url below, which is just display copy shown to
+# traders. Leave both unset to run this bot exactly as before, with no
+# leaderboard integration at all: registration is skipped silently (not an
+# error) whenever either is blank, so upgrading to this version is safe
+# even before the leaderboard side is wired up.
+LEADERBOARD_API_URL = os.environ.get("LEADERBOARD_API_URL", "").rstrip("/")
+LEADERBOARD_ADMIN_TOKEN = os.environ.get("LEADERBOARD_ADMIN_TOKEN", "")
+
 # Name of the sheet tab that holds per-round settings (Key | Value columns).
 # See README for the exact keys the bot reads - editing this tab is how you
 # change the challenge dates/amounts/prize/links each round, no code or git
@@ -64,12 +81,28 @@ CONFIG_DEFAULTS = {
     # rolling leaderboard (top-3 PnL cash + raffles) - see LEADERBOARD_INVITE
     # in messages.py and poll_sheet in jobs.py.
     "leaderboard_invite_delay_hours": "48",
-    "leaderboard_url": "https://avantis-traders-club.up.railway.app/",
+    # The CURRENT Veranta Challenges Trading Leaderboard - update this same
+    # key in the Config tab if the Railway domain ever changes; this default
+    # is only what's used if that Config row is ever missing.
+    "leaderboard_url": "https://veranta-challenges-leaderboard-production.up.railway.app/",
     # Kill switch for the leaderboard invite - set to FALSE in the Config
     # tab to stop it going out entirely (e.g. while the leaderboard itself
     # isn't ready yet), no redeploy needed. Defaults to TRUE so existing
     # behavior is unchanged for anyone who doesn't set this.
     "leaderboard_invite_enabled": "TRUE",
+    # Kill switch for auto-registering a trader's wallet on the leaderboard
+    # (separate from the invite message above - see jobs.py). Set to FALSE
+    # in the Config tab to stop it without touching LEADERBOARD_API_URL/
+    # LEADERBOARD_ADMIN_TOKEN. Defaults to TRUE - has no effect at all
+    # unless those two env vars are also set, since registration is already
+    # skipped whenever they're blank.
+    "leaderboard_registration_enabled": "TRUE",
+    # Optional: a standing Telegram invite link to a separate "prize
+    # participants" channel/group. Appended to the leaderboard invite
+    # message (see LEADERBOARD_CHANNEL_INVITE_LINE in messages.py) only
+    # when this is non-empty - leave it blank to send the plain invite with
+    # no channel line at all, e.g. before that channel exists yet.
+    "leaderboard_channel_invite_link": "",
     # How long a claim can sit with no Verify/Reject tap before the mod
     # group gets a reminder nudge - see poll_sheet in jobs.py.
     "claim_reminder_delay_hours": "24",
@@ -78,10 +111,11 @@ CONFIG_DEFAULTS = {
 # Column layout in the worksheet. Row 1 must be a header row with exactly
 # these names (any order - the bot looks columns up by header, not position).
 #
-# LeaderboardInviteSent, ClaimRequestedAt, and ClaimReminderSent are new -
-# if you're upgrading an existing sheet, add these three columns to the
-# header row BEFORE deploying this version, or the bot will refuse to
-# start (same RuntimeError FundedAt caused when that one was added).
+# LeaderboardRegistered is new - if you're upgrading an existing sheet, add
+# this column to the header row BEFORE deploying this version, or the bot
+# will refuse to start (same RuntimeError FundedAt caused when that one was
+# added). LeaderboardInviteSent, ClaimRequestedAt, and ClaimReminderSent
+# were the previous round of additions.
 COLUMNS = [
     "Timestamp",
     "Email Address",
@@ -93,6 +127,7 @@ COLUMNS = [
     "Funded",
     "FundedAt",         # ISO UTC timestamp, written when a mod clicks Fund - the challenge clock starts here
     "GuideSent",
+    "LeaderboardRegistered",  # TRUE once this row's wallet has been POSTed to the leaderboard's /api/wallets
     "LeaderboardInviteSent",  # TRUE once the weekly-leaderboard invite has gone out for this row
     "ClaimStatus",       # "", "REQUESTED", "VERIFIED", "REJECTED"
     "ClaimRequestedAt",  # ISO UTC timestamp, stamped when a claim is confirmed - used for the 24h stale-claim reminder

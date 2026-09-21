@@ -1042,6 +1042,219 @@ def test_leaderboard_invite_kill_switch_suppresses_it(monkeypatch):
     assert not any(w[1] == "LeaderboardInviteSent" for w in writes)
 
 
+def _funded_row_with_wallet(**overrides):
+    row = {
+        "_row": 4,
+        "ChatID": "888",
+        "TelegramUsername": "trader1",
+        "Funded": "TRUE",
+        "FundedAt": datetime(2026, 9, 10, 12, 0, tzinfo=timezone.utc).isoformat(),  # just funded
+        "WalletAddress": "0x" + "a" * 40,
+        "LeaderboardRegistered": "",
+        "LeaderboardInviteSent": "TRUE",  # already sent - isolates the registration test from the invite path
+        "GuideSent": "TRUE",
+    }
+    row.update(overrides)
+    return row
+
+
+def test_poll_registers_wallet_immediately_when_funded_not_gated_by_invite_delay(monkeypatch):
+    """Registration must not wait for leaderboard_invite_delay_hours - a
+    wallet funded seconds ago should be registered on this very poll, since
+    an unregistered wallet with no volume shows up nowhere on the public
+    board anyway."""
+    from bot import config as bot_config
+    from bot import jobs
+
+    monkeypatch.setattr(bot_config, "LEADERBOARD_API_URL", "https://leaderboard.example.com")
+    monkeypatch.setattr(bot_config, "LEADERBOARD_ADMIN_TOKEN", "secret-token")
+    register_mock = MagicMock(return_value={"wallet_address": "0x" + "a" * 40, "telegram_handle": "trader1"})
+    monkeypatch.setattr(jobs.leaderboard, "register_wallet", register_mock)
+
+    store = MagicMock()
+    store.all_rows.return_value = [_funded_row_with_wallet()]
+    store.get_config.return_value = {}
+    store.is_true.side_effect = lambda row, col: str(row.get(col, "")).strip().upper() == "TRUE"
+    context = MagicMock()
+    context.bot_data = {"store": store}
+    context.bot.send_message = AsyncMock()
+
+    asyncio.run(jobs.poll_sheet(context))
+
+    register_mock.assert_called_once_with("trader1", "0x" + "a" * 40)
+    writes = [c.args for c in store.update_cell.call_args_list]
+    assert (4, "LeaderboardRegistered", "TRUE") in writes
+    context.bot.send_message.assert_not_called()  # registration itself is silent - no DM
+
+
+def test_poll_skips_registration_when_leaderboard_not_configured(monkeypatch):
+    """LEADERBOARD_API_URL/LEADERBOARD_ADMIN_TOKEN unset (the default for
+    any install that hasn't wired this up) must not attempt a call or write
+    anything - not an error, just the feature being off."""
+    from bot import config as bot_config
+    from bot import jobs
+
+    monkeypatch.setattr(bot_config, "LEADERBOARD_API_URL", "")
+    monkeypatch.setattr(bot_config, "LEADERBOARD_ADMIN_TOKEN", "")
+    register_mock = MagicMock()
+    monkeypatch.setattr(jobs.leaderboard, "register_wallet", register_mock)
+
+    store = MagicMock()
+    store.all_rows.return_value = [_funded_row_with_wallet()]
+    store.get_config.return_value = {}
+    store.is_true.side_effect = lambda row, col: str(row.get(col, "")).strip().upper() == "TRUE"
+    context = MagicMock()
+    context.bot_data = {"store": store}
+    context.bot.send_message = AsyncMock()
+
+    asyncio.run(jobs.poll_sheet(context))
+
+    register_mock.assert_not_called()
+    writes = [c.args for c in store.update_cell.call_args_list]
+    assert not any(w[1] == "LeaderboardRegistered" for w in writes)
+
+
+def test_leaderboard_registration_kill_switch_suppresses_it(monkeypatch):
+    """leaderboard_registration_enabled=FALSE in the Config tab stops
+    registration without touching the invite message or requiring the env
+    vars to be unset."""
+    from bot import config as bot_config
+    from bot import jobs
+
+    monkeypatch.setattr(bot_config, "LEADERBOARD_API_URL", "https://leaderboard.example.com")
+    monkeypatch.setattr(bot_config, "LEADERBOARD_ADMIN_TOKEN", "secret-token")
+    register_mock = MagicMock()
+    monkeypatch.setattr(jobs.leaderboard, "register_wallet", register_mock)
+
+    store = MagicMock()
+    store.all_rows.return_value = [_funded_row_with_wallet()]
+    store.get_config.return_value = {"leaderboard_registration_enabled": "FALSE"}
+    store.is_true.side_effect = lambda row, col: str(row.get(col, "")).strip().upper() == "TRUE"
+    context = MagicMock()
+    context.bot_data = {"store": store}
+    context.bot.send_message = AsyncMock()
+
+    asyncio.run(jobs.poll_sheet(context))
+
+    register_mock.assert_not_called()
+
+
+def test_poll_leaves_registration_unset_on_failure_so_it_retries(monkeypatch):
+    """A failed registration call (leaderboard down, handle conflict, etc.)
+    must not be marked as done, and must not crash the whole poll cycle -
+    it just gets retried on the next poll."""
+    from bot import config as bot_config
+    from bot import jobs
+
+    monkeypatch.setattr(bot_config, "LEADERBOARD_API_URL", "https://leaderboard.example.com")
+    monkeypatch.setattr(bot_config, "LEADERBOARD_ADMIN_TOKEN", "secret-token")
+    register_mock = MagicMock(side_effect=RuntimeError("Leaderboard registration failed (400): conflict"))
+    monkeypatch.setattr(jobs.leaderboard, "register_wallet", register_mock)
+
+    store = MagicMock()
+    store.all_rows.return_value = [_funded_row_with_wallet()]
+    store.get_config.return_value = {}
+    store.is_true.side_effect = lambda row, col: str(row.get(col, "")).strip().upper() == "TRUE"
+    context = MagicMock()
+    context.bot_data = {"store": store}
+    context.bot.send_message = AsyncMock()
+
+    asyncio.run(jobs.poll_sheet(context))  # must not raise
+
+    register_mock.assert_called_once()
+    writes = [c.args for c in store.update_cell.call_args_list]
+    assert not any(w[1] == "LeaderboardRegistered" for w in writes)
+
+
+def test_leaderboard_invite_goes_through_the_channel_when_configured(monkeypatch):
+    """leaderboard_channel_invite_link, when set in the Config tab, replaces
+    the direct-link invite with a channel-first one: the DM points at the
+    channel only, never the leaderboard URL itself - that link is meant to
+    live inside the channel, not in this message."""
+    from bot import jobs
+
+    fixed_now = datetime(2026, 9, 10, 12, 0, tzinfo=timezone.utc)
+
+    class _FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed_now
+
+    monkeypatch.setattr(jobs, "datetime", _FixedDatetime)
+
+    funded_at = datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc)  # 48h ago
+    store = MagicMock()
+    store.all_rows.return_value = [
+        {
+            "_row": 4,
+            "ChatID": "888",
+            "Funded": "TRUE",
+            "FundedAt": funded_at.isoformat(),
+            "LeaderboardInviteSent": "",
+            "GuideSent": "TRUE",
+        }
+    ]
+    store.get_config.return_value = {
+        "leaderboard_url": "https://example.com/leaderboard",
+        "challenge_duration": "5 days",
+        "leaderboard_channel_invite_link": "https://t.me/+prizechannel",
+    }
+    store.is_true.side_effect = lambda row, col: str(row.get(col, "")).strip().upper() == "TRUE"
+    context = MagicMock()
+    context.bot_data = {"store": store}
+    context.bot.send_message = AsyncMock()
+
+    asyncio.run(jobs.poll_sheet(context))
+
+    sent_text = context.bot.send_message.call_args.kwargs["text"]
+    assert "https://t.me/+prizechannel" in sent_text
+    assert "https://example.com/leaderboard" not in sent_text  # the direct link must NOT leak into the DM
+    writes = [c.args for c in store.update_cell.call_args_list]
+    assert (4, "LeaderboardInviteSent", "TRUE") in writes
+
+
+def test_leaderboard_invite_sends_direct_link_when_no_channel_configured(monkeypatch):
+    """No leaderboard_channel_invite_link set (the default) falls back to
+    the plain direct-link invite, unchanged from before."""
+    from bot import jobs
+
+    fixed_now = datetime(2026, 9, 10, 12, 0, tzinfo=timezone.utc)
+
+    class _FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed_now
+
+    monkeypatch.setattr(jobs, "datetime", _FixedDatetime)
+
+    funded_at = datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc)  # 48h ago
+    store = MagicMock()
+    store.all_rows.return_value = [
+        {
+            "_row": 4,
+            "ChatID": "888",
+            "Funded": "TRUE",
+            "FundedAt": funded_at.isoformat(),
+            "LeaderboardInviteSent": "",
+            "GuideSent": "TRUE",
+        }
+    ]
+    store.get_config.return_value = {
+        "leaderboard_url": "https://example.com/leaderboard",
+        "challenge_duration": "5 days",
+    }
+    store.is_true.side_effect = lambda row, col: str(row.get(col, "")).strip().upper() == "TRUE"
+    context = MagicMock()
+    context.bot_data = {"store": store}
+    context.bot.send_message = AsyncMock()
+
+    asyncio.run(jobs.poll_sheet(context))
+
+    sent_text = context.bot.send_message.call_args.kwargs["text"]
+    assert "https://example.com/leaderboard" in sent_text
+    assert "channel" not in sent_text.lower()
+
+
 def _make_command_update(chat_id):
     update = MagicMock()
     update.effective_chat.id = chat_id
