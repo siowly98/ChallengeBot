@@ -6,6 +6,7 @@ Everything here checks it's being used inside the configured mod group -
 these actions should never be reachable by a trader.
 """
 import asyncio
+import logging
 from datetime import datetime, timezone
 
 from telegram import Update
@@ -15,6 +16,18 @@ from .. import messages
 from ..deadlines import compute_deadline, format_deadline, format_timedelta, funded_late_in_week
 from ..sheets import SheetStore
 
+logger = logging.getLogger(__name__)
+
+# Deliberately far under Telegram's documented ~30 msg/sec free-tier ceiling
+# for bulk notifications - a broadcast here is never time-sensitive, so
+# there's no reason to push anywhere near that limit for a one-off
+# announcement. This paces sends on top of (not instead of) the bot's own
+# AIORateLimiter, as a second, independent throttle.
+BROADCAST_SEND_DELAY_SECONDS = 1.0
+# How often (in recipients processed) to post a progress update in the mod
+# group during a large broadcast, so a multi-minute run doesn't look stalled.
+BROADCAST_PROGRESS_EVERY = 100
+
 
 def get_store(context: ContextTypes.DEFAULT_TYPE) -> SheetStore:
     return context.bot_data["store"]
@@ -22,6 +35,163 @@ def get_store(context: ContextTypes.DEFAULT_TYPE) -> SheetStore:
 
 def _is_mod_group(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     return update.effective_chat.id == context.bot_data["mod_group_chat_id"]
+
+
+def _command_argument_text(update: Update) -> str:
+    """Everything typed after the /command token, preserving line breaks.
+
+    context.args isn't usable here - it splits the whole command on any
+    whitespace, which throws away line breaks a mod puts in a multi-line
+    announcement. Locating the bot_command entity handles both "/broadcast
+    text" and "/broadcast@YourBotName text" (the latter is how Telegram
+    sends commands in some group contexts) without guessing at the command
+    name's length.
+    """
+    message = update.message
+    if not message or not message.text:
+        return ""
+    for entity in message.entities or []:
+        if entity.type == "bot_command" and entity.offset == 0:
+            return message.text[entity.offset + entity.length :].strip()
+    return ""
+
+
+def _funded_recipients(store: SheetStore) -> list[tuple[int, dict]]:
+    """Every currently-funded trader with a linked Telegram chat, as
+    (chat_id, row) pairs. A Funded row with no ChatID (shouldn't normally
+    happen, but the sheet is hand-edited) is silently excluded rather than
+    counted as a later "failed" send - it was never sendable to begin with."""
+    out = []
+    for row in store.all_rows():
+        if not store.is_true(row, "Funded"):
+            continue
+        chat_id_raw = row.get("ChatID")
+        if not chat_id_raw:
+            continue
+        try:
+            out.append((int(chat_id_raw), row))
+        except ValueError:
+            continue
+    return out
+
+
+async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Usage (in the mod group): /broadcast <message>
+
+    Stages a plain-text broadcast to every currently-funded trader and
+    replies with a preview plus the recipient count - it does NOT send
+    anything itself. A mod has to follow up with /broadcastconfirm to
+    actually fire it. Two steps on purpose: a broadcast has no
+    per-recipient undo, so a typo or a wrong draft going out to hundreds
+    of people can't be walked back the way a single DM or an edited card
+    can be.
+
+    No Markdown/HTML parsing - past Telegram-parsing bugs here (see the
+    "verify" branch of handle_button) came from re-parsing text that
+    contained characters Markdown treats as formatting syntax. A mod's own
+    free-text announcement is exactly the kind of input that's likely to
+    contain those by accident, so this sends it as plain text rather than
+    risk the whole broadcast failing on a parse error.
+    """
+    if not _is_mod_group(update, context):
+        return
+
+    text = _command_argument_text(update)
+    if not text:
+        await update.message.reply_text(
+            "Usage: /broadcast <message>\n\nThen confirm with /broadcastconfirm."
+        )
+        return
+
+    store = get_store(context)
+    recipients = await asyncio.to_thread(_funded_recipients, store)
+    if not recipients:
+        await update.message.reply_text("No funded traders with a linked Telegram to broadcast to.")
+        return
+
+    context.bot_data["pending_broadcast"] = {
+        "text": text,
+        "recipients": recipients,
+        "staged_by": update.effective_user.first_name if update.effective_user else "a mod",
+    }
+    eta_minutes = round(len(recipients) * BROADCAST_SEND_DELAY_SECONDS / 60, 1)
+    await update.message.reply_text(
+        f"Draft staged - will send to {len(recipients)} funded traders as plain text "
+        f"(~{eta_minutes} min at the throttled send rate):\n\n"
+        f"{text}\n\n"
+        f"Reply /broadcastconfirm to send, or run /broadcast again to replace this draft."
+    )
+
+
+async def broadcastconfirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Usage (in the mod group): /broadcastconfirm - sends the draft staged
+    by /broadcast. See that command's docstring for why this is a separate
+    confirmation step rather than /broadcast sending directly."""
+    if not _is_mod_group(update, context):
+        return
+
+    if context.bot_data.get("broadcast_running"):
+        await update.message.reply_text(
+            "A broadcast is already in progress - wait for it to finish before starting another."
+        )
+        return
+
+    pending = context.bot_data.pop("pending_broadcast", None)
+    if pending is None:
+        await update.message.reply_text("No broadcast is staged. Run /broadcast <message> first.")
+        return
+
+    context.bot_data["broadcast_running"] = True
+    mod_group_id = context.bot_data["mod_group_chat_id"]
+    await update.message.reply_text(
+        f"Sending to {len(pending['recipients'])} funded traders, throttled to about "
+        f"1 message/second - progress updates will follow in this chat."
+    )
+    asyncio.create_task(_run_broadcast(context, pending, mod_group_id))
+
+
+async def _run_broadcast(context: ContextTypes.DEFAULT_TYPE, pending: dict, mod_group_id: int):
+    """Runs in the background (kicked off by broadcastconfirm via
+    asyncio.create_task) so the command handler returns immediately instead
+    of holding the mod group's chat open for however long a throttled
+    500-recipient send takes (~8-9 minutes at the default pacing).
+
+    Sends are sequential with an explicit sleep between them - see
+    BROADCAST_SEND_DELAY_SECONDS - and a failure on one recipient (blocked
+    the bot, deleted account, etc.) is logged and counted, not retried
+    forever and not allowed to abort the rest of the run.
+    """
+    text = pending["text"]
+    recipients = pending["recipients"]
+    total = len(recipients)
+    sent = 0
+    failed = 0
+    try:
+        for i, (chat_id, row) in enumerate(recipients, start=1):
+            try:
+                await context.bot.send_message(chat_id=chat_id, text=text)
+                sent += 1
+            except Exception:
+                failed += 1
+                logger.exception(
+                    "Broadcast send failed for chat_id=%s (row %s)", chat_id, row.get("_row")
+                )
+
+            if i % BROADCAST_PROGRESS_EVERY == 0 and i != total:
+                await context.bot.send_message(
+                    chat_id=mod_group_id,
+                    text=f"Broadcast progress: {i}/{total} processed ({sent} sent, {failed} failed)",
+                )
+
+            if i != total:
+                await asyncio.sleep(BROADCAST_SEND_DELAY_SECONDS)
+    finally:
+        context.bot_data["broadcast_running"] = False
+
+    await context.bot.send_message(
+        chat_id=mod_group_id,
+        text=f"Broadcast complete: {sent} sent, {failed} failed, out of {total} funded traders.",
+    )
 
 
 async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):

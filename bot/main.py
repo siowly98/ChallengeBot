@@ -101,6 +101,8 @@ def main():
     app.add_handler(CommandHandler("claim", trader.claim, filters=not_mod_group))
     app.add_handler(CommandHandler("invite", admin.invite))
     app.add_handler(CommandHandler("check", admin.check))
+    app.add_handler(CommandHandler("broadcast", admin.broadcast))
+    app.add_handler(CommandHandler("broadcastconfirm", admin.broadcastconfirm))
     # Patterns keep these two callback handlers from ever seeing each
     # other's taps - mod-group card buttons (fund/verify/reject) vs. a
     # trader's own claim-confirmation prompt (claimconfirm/claimcancel).

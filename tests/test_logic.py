@@ -1416,3 +1416,217 @@ def test_check_command_omits_deadline_when_not_funded():
     sent = update.message.reply_text.call_args[0][0]
     assert "Deadline:" not in sent
     store.get_config.assert_not_called()
+
+
+def _make_broadcast_update(chat_id, text, command="/broadcast"):
+    update = MagicMock()
+    update.effective_chat.id = chat_id
+    update.effective_user.first_name = "Mod"
+    update.message.text = text
+    entity = MagicMock()
+    entity.type = "bot_command"
+    entity.offset = 0
+    entity.length = len(command)
+    update.message.entities = [entity]
+    update.message.reply_text = AsyncMock()
+    return update
+
+
+def _funded_row(row_num, chat_id):
+    return {
+        "_row": row_num,
+        "ChatID": str(chat_id) if chat_id != "" else "",
+        "Email Address": f"trader{row_num}@x.com",
+        "TelegramUsername": f"trader{row_num}",
+        "WalletAddress": "0x" + "a" * 40,
+        "Funded": "TRUE",
+    }
+
+
+def test_broadcast_command_outside_mod_group_does_nothing():
+    store = MagicMock()
+    context = MagicMock()
+    context.bot_data = {"store": store, "mod_group_chat_id": -100}
+    update = _make_broadcast_update(555, "/broadcast hello everyone")
+
+    asyncio.run(admin.broadcast(update, context))
+
+    update.message.reply_text.assert_not_called()
+    store.all_rows.assert_not_called()
+
+
+def test_broadcast_command_requires_a_message():
+    store = MagicMock()
+    context = MagicMock()
+    context.bot_data = {"store": store, "mod_group_chat_id": -100}
+    update = _make_broadcast_update(-100, "/broadcast")
+
+    asyncio.run(admin.broadcast(update, context))
+
+    sent = update.message.reply_text.call_args[0][0]
+    assert "Usage: /broadcast" in sent
+    assert "pending_broadcast" not in context.bot_data
+
+
+def test_broadcast_stages_a_draft_and_counts_only_funded_traders_with_a_chat_id():
+    store = MagicMock()
+    store.is_true.side_effect = lambda row, col: str(row.get(col, "")).strip().upper() == "TRUE"
+    store.all_rows.return_value = [
+        _funded_row(2, 111),
+        _funded_row(3, 222),
+        {**_funded_row(4, ""), "ChatID": ""},  # funded but never linked Telegram
+        {**_funded_row(5, 333), "Funded": "FALSE"},  # not funded
+    ]
+    context = MagicMock()
+    context.bot_data = {"store": store, "mod_group_chat_id": -100}
+    update = _make_broadcast_update(-100, "/broadcast Arena 2 opens Monday - trade now.")
+
+    asyncio.run(admin.broadcast(update, context))
+
+    pending = context.bot_data["pending_broadcast"]
+    assert pending["text"] == "Arena 2 opens Monday - trade now."
+    assert sorted(cid for cid, _ in pending["recipients"]) == [111, 222]
+
+    sent = update.message.reply_text.call_args[0][0]
+    assert "2 funded traders" in sent
+    assert "Arena 2 opens Monday - trade now." in sent
+    assert "/broadcastconfirm" in sent
+
+
+def test_broadcast_preserves_line_breaks_in_the_message():
+    store = MagicMock()
+    store.is_true.side_effect = lambda row, col: str(row.get(col, "")).strip().upper() == "TRUE"
+    store.all_rows.return_value = [_funded_row(2, 111)]
+    context = MagicMock()
+    context.bot_data = {"store": store, "mod_group_chat_id": -100}
+    update = _make_broadcast_update(-100, "/broadcast Line one\nLine two")
+
+    asyncio.run(admin.broadcast(update, context))
+
+    assert context.bot_data["pending_broadcast"]["text"] == "Line one\nLine two"
+
+
+def test_broadcast_with_no_funded_traders_does_not_stage_a_draft():
+    store = MagicMock()
+    store.is_true.side_effect = lambda row, col: str(row.get(col, "")).strip().upper() == "TRUE"
+    store.all_rows.return_value = []
+    context = MagicMock()
+    context.bot_data = {"store": store, "mod_group_chat_id": -100}
+    update = _make_broadcast_update(-100, "/broadcast hi")
+
+    asyncio.run(admin.broadcast(update, context))
+
+    assert "pending_broadcast" not in context.bot_data
+    sent = update.message.reply_text.call_args[0][0]
+    assert "No funded traders" in sent
+
+
+def test_broadcastconfirm_outside_mod_group_does_nothing():
+    context = MagicMock()
+    context.bot_data = {
+        "mod_group_chat_id": -100,
+        "pending_broadcast": {"text": "x", "recipients": [(1, {})]},
+    }
+    update = _make_broadcast_update(555, "/broadcastconfirm")
+
+    asyncio.run(admin.broadcastconfirm(update, context))
+
+    update.message.reply_text.assert_not_called()
+    assert "pending_broadcast" in context.bot_data  # untouched
+
+
+def test_broadcastconfirm_with_nothing_staged():
+    context = MagicMock()
+    context.bot_data = {"mod_group_chat_id": -100}
+    update = _make_broadcast_update(-100, "/broadcastconfirm")
+
+    asyncio.run(admin.broadcastconfirm(update, context))
+
+    sent = update.message.reply_text.call_args[0][0]
+    assert "No broadcast is staged" in sent
+
+
+def test_broadcastconfirm_refuses_a_second_broadcast_while_one_is_running():
+    context = MagicMock()
+    context.bot_data = {
+        "mod_group_chat_id": -100,
+        "broadcast_running": True,
+        "pending_broadcast": {"text": "x", "recipients": [(1, {})]},
+    }
+    update = _make_broadcast_update(-100, "/broadcastconfirm")
+
+    asyncio.run(admin.broadcastconfirm(update, context))
+
+    sent = update.message.reply_text.call_args[0][0]
+    assert "already in progress" in sent
+    # the stale draft from before the running broadcast should be left alone
+    assert context.bot_data["pending_broadcast"]["text"] == "x"
+
+
+def test_broadcastconfirm_pops_the_draft_and_schedules_the_send(monkeypatch):
+    created = {}
+
+    def fake_create_task(coro):
+        created["coro"] = coro
+        coro.close()  # avoid it actually running here, and an "unawaited" warning
+        return MagicMock()
+
+    monkeypatch.setattr(admin.asyncio, "create_task", fake_create_task)
+
+    context = MagicMock()
+    context.bot_data = {
+        "mod_group_chat_id": -100,
+        "pending_broadcast": {"text": "hi", "recipients": [(1, {}), (2, {})]},
+    }
+    update = _make_broadcast_update(-100, "/broadcastconfirm")
+
+    asyncio.run(admin.broadcastconfirm(update, context))
+
+    assert "pending_broadcast" not in context.bot_data
+    assert context.bot_data["broadcast_running"] is True
+    assert "coro" in created
+    sent = update.message.reply_text.call_args[0][0]
+    assert "2 funded traders" in sent
+
+
+def test_run_broadcast_sends_to_everyone_counts_failures_and_reports_a_total(monkeypatch):
+    monkeypatch.setattr(admin, "BROADCAST_SEND_DELAY_SECONDS", 0)
+    monkeypatch.setattr(admin, "BROADCAST_PROGRESS_EVERY", 2)
+
+    send_results = [None, RuntimeError("blocked"), None, None, None]
+
+    async def fake_send_message(chat_id, text):
+        if chat_id == -100:  # a progress/final update to the mod group, not a recipient
+            return None
+        result = send_results[chat_id]
+        if isinstance(result, Exception):
+            raise result
+        return None
+
+    bot = MagicMock()
+    bot.send_message = AsyncMock(side_effect=fake_send_message)
+    context = MagicMock()
+    context.bot = bot
+    context.bot_data = {"broadcast_running": True}
+
+    pending = {
+        "text": "Announcement",
+        "recipients": [(i, {"_row": i + 1}) for i in range(5)],
+    }
+
+    asyncio.run(admin._run_broadcast(context, pending, mod_group_id=-100))
+
+    assert context.bot_data["broadcast_running"] is False
+
+    calls = bot.send_message.call_args_list
+    final_call = calls[-1]
+    assert final_call.kwargs["chat_id"] == -100
+    assert "4 sent, 1 failed, out of 5" in final_call.kwargs["text"]
+
+    progress_texts = [
+        c.kwargs["text"]
+        for c in calls
+        if c.kwargs.get("chat_id") == -100 and "progress" in c.kwargs.get("text", "").lower()
+    ]
+    assert any("2/5 processed" in t for t in progress_texts)
+    assert any("4/5 processed" in t for t in progress_texts)

@@ -426,6 +426,23 @@ push + Railway redeploy.
   check a claim's timing beyond what's already on the claim card. Since
   this takes the row number you currently see in the sheet, it's always
   accurate regardless of past row shifts.
+- `/broadcast <message>` then `/broadcastconfirm` - DMs every currently
+  funded trader (anyone with `Funded=TRUE` and a linked `ChatID`) the same
+  plain-text message. `/broadcast` only stages the draft and replies with
+  a preview plus the recipient count; nothing is sent until you follow up
+  with `/broadcastconfirm` in the same chat - there's no per-recipient
+  undo once it's out, so a wrong draft can't be walked back the way a
+  single DM or a card edit can. Sends are throttled to about one message
+  per second (well under Telegram's own bulk-notification limit) with a
+  progress update in the mod group every 100 recipients and a final
+  sent/failed count when it's done - at that pace, a broadcast to a few
+  hundred traders takes several minutes, so it's meant for announcements,
+  not anything time-critical. A trader who's funded but never linked
+  their Telegram (no `ChatID` on their row) is skipped, not counted as a
+  failure. Plain text only, deliberately - no Markdown/HTML parsing, since
+  a mod's free-text announcement is exactly the kind of input likely to
+  contain a stray `_` or `*` that would otherwise break formatting parsing
+  for the whole message (see the note on the "verify" button above).
 
 Trader-facing commands (`/start`, `/status`, `/claim`) and the plain-text
 email/wallet flow are deliberately disabled inside the mod group - a mod
@@ -485,5 +502,5 @@ bot/
   main.py              # wires it all together, entry point
   handlers/
     trader.py          # /start, /status, /claim, and the email/wallet text flow
-    admin.py            # mod group button taps + /invite, /check commands
+    admin.py            # mod group button taps + /invite, /check, /broadcast commands
 ```
