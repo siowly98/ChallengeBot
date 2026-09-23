@@ -27,6 +27,13 @@ BROADCAST_SEND_DELAY_SECONDS = 1.0
 # How often (in recipients processed) to post a progress update in the mod
 # group during a large broadcast, so a multi-minute run doesn't look stalled.
 BROADCAST_PROGRESS_EVERY = 100
+# How many successful sends to batch into one BroadcastSent write. Google's
+# Sheets API quota is 60 write requests/minute/user - writing one cell per
+# send at the ~1/sec broadcast pace would sit right at that ceiling and risk
+# 429s from Google on top of anything Telegram-side. Batching bounds a
+# broadcast's sheet writes to a small fraction of that quota, at the cost of
+# up to this many recipients being re-sent to if the process dies mid-batch.
+BROADCAST_MARK_SENT_BATCH_SIZE = 10
 
 
 def get_store(context: ContextTypes.DEFAULT_TYPE) -> SheetStore:
@@ -57,13 +64,25 @@ def _command_argument_text(update: Update) -> str:
 
 
 def _funded_recipients(store: SheetStore) -> list[tuple[int, dict]]:
-    """Every currently-funded trader with a linked Telegram chat, as
-    (chat_id, row) pairs. A Funded row with no ChatID (shouldn't normally
-    happen, but the sheet is hand-edited) is silently excluded rather than
-    counted as a later "failed" send - it was never sendable to begin with."""
+    """Every currently-funded trader with a linked Telegram chat who hasn't
+    already received a broadcast, as (chat_id, row) pairs.
+
+    A Funded row with no ChatID (shouldn't normally happen, but the sheet is
+    hand-edited) is silently excluded rather than counted as a later
+    "failed" send - it was never sendable to begin with.
+
+    BroadcastSent=TRUE rows are excluded so that running /broadcast again
+    later - e.g. daily, to reach newly-funded traders - never re-messages
+    someone who already got a broadcast. This means every broadcast shares
+    one "have they ever gotten a broadcast" flag rather than being tracked
+    per distinct message; sending a genuinely different second announcement
+    to everyone again means clearing the column by hand in the sheet first
+    (same as the existing "starting a new round" reset)."""
     out = []
     for row in store.all_rows():
         if not store.is_true(row, "Funded"):
+            continue
+        if store.is_true(row, "BroadcastSent"):
             continue
         chat_id_raw = row.get("ChatID")
         if not chat_id_raw:
@@ -160,17 +179,43 @@ async def _run_broadcast(context: ContextTypes.DEFAULT_TYPE, pending: dict, mod_
     BROADCAST_SEND_DELAY_SECONDS - and a failure on one recipient (blocked
     the bot, deleted account, etc.) is logged and counted, not retried
     forever and not allowed to abort the rest of the run.
+
+    Every successful send marks that row's BroadcastSent=TRUE (batched -
+    see BROADCAST_MARK_SENT_BATCH_SIZE) so a later /broadcast never
+    re-messages them. A failed send is deliberately left unmarked, so
+    whoever it was skipped for (blocked the bot, etc.) still shows up as a
+    recipient if a mod re-runs a broadcast later.
     """
+    store = get_store(context)
     text = pending["text"]
     recipients = pending["recipients"]
     total = len(recipients)
     sent = 0
     failed = 0
+    unflushed_rows: dict[int, dict] = {}
+
+    async def _flush_sent_marks():
+        if not unflushed_rows:
+            return
+        batch = dict(unflushed_rows)
+        unflushed_rows.clear()
+        try:
+            await asyncio.to_thread(store.update_many_cells, batch)
+        except Exception:
+            logger.exception(
+                "Failed to mark %d row(s) BroadcastSent after a successful send - "
+                "they'll be re-messaged by the next /broadcast run",
+                len(batch),
+            )
+
     try:
         for i, (chat_id, row) in enumerate(recipients, start=1):
             try:
                 await context.bot.send_message(chat_id=chat_id, text=text)
                 sent += 1
+                unflushed_rows[row["_row"]] = {"BroadcastSent": "TRUE"}
+                if len(unflushed_rows) >= BROADCAST_MARK_SENT_BATCH_SIZE:
+                    await _flush_sent_marks()
             except Exception:
                 failed += 1
                 logger.exception(
@@ -185,6 +230,7 @@ async def _run_broadcast(context: ContextTypes.DEFAULT_TYPE, pending: dict, mod_
 
             if i != total:
                 await asyncio.sleep(BROADCAST_SEND_DELAY_SECONDS)
+        await _flush_sent_marks()
     finally:
         context.bot_data["broadcast_running"] = False
 

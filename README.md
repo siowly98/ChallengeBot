@@ -71,23 +71,23 @@ these column headers (order doesn't matter, spelling does):
 Timestamp | Email Address | TelegramUsername | ChatID | Eligible | ApprovalSent |
 WalletAddress | Funded | FundedAt | GuideSent | LeaderboardRegistered |
 LeaderboardInviteSent | ClaimStatus | ClaimRequestedAt | ClaimReminderSent |
-ClaimInstructionsSent | Notes
+ClaimInstructionsSent | BroadcastSent | Notes
 ```
 
 If your Google Form responses already land in a sheet, just add the
 columns the bot manages (`TelegramUsername`, `ChatID`, `Eligible`,
 `ApprovalSent`, `WalletAddress`, `Funded`, `FundedAt`, `GuideSent`,
 `LeaderboardRegistered`, `LeaderboardInviteSent`, `ClaimStatus`,
-`ClaimRequestedAt`, `ClaimReminderSent`, `ClaimInstructionsSent`, `Notes`) to
-that same tab - `Timestamp` and `Email Address` should already be there
-from the Form.
+`ClaimRequestedAt`, `ClaimReminderSent`, `ClaimInstructionsSent`,
+`BroadcastSent`, `Notes`) to that same tab - `Timestamp` and
+`Email Address` should already be there from the Form.
 
-**Upgrading an existing sheet:** `LeaderboardRegistered` is new. Add it to
-the header row before deploying this version - a missing required column
+**Upgrading an existing sheet:** `BroadcastSent` is new. Add it to the
+header row before deploying this version - a missing required column
 makes the bot refuse to start with a `RuntimeError` naming it (same thing
-that happened when `FundedAt` was added). `LeaderboardInviteSent`,
-`ClaimRequestedAt`, and `ClaimReminderSent` were the previous round of
-additions.
+that happened when `FundedAt` was added). `LeaderboardRegistered`,
+`LeaderboardInviteSent`, `ClaimRequestedAt`, and `ClaimReminderSent` were
+previous rounds of additions.
 Note: `TelegramUsername` (bot-managed) is separate from any self-reported
 "Your Telegram @username" column your form already has - keep both.
 
@@ -427,9 +427,19 @@ push + Railway redeploy.
   this takes the row number you currently see in the sheet, it's always
   accurate regardless of past row shifts.
 - `/broadcast <message>` then `/broadcastconfirm` - DMs every currently
-  funded trader (anyone with `Funded=TRUE` and a linked `ChatID`) the same
-  plain-text message. `/broadcast` only stages the draft and replies with
-  a preview plus the recipient count; nothing is sent until you follow up
+  funded trader (anyone with `Funded=TRUE` and a linked `ChatID`) who
+  hasn't already received a broadcast the same plain-text message. Every
+  successful send marks that row's `BroadcastSent=TRUE`, so running
+  `/broadcast` again later - e.g. daily, as new traders get funded - only
+  reaches people who haven't gotten one yet; it never re-messages the same
+  trader twice. That flag is shared across all broadcasts (not per
+  distinct message), so if you ever need to send a genuinely different
+  announcement to everyone again, clear the `BroadcastSent` column by hand
+  in the sheet first (same as the "starting a new round" reset below). A
+  failed send (blocked the bot, etc.) is deliberately left unmarked, so
+  that trader is picked up again by the next broadcast instead of being
+  silently skipped forever. `/broadcast` only stages the draft and replies
+  with a preview plus the recipient count; nothing is sent until you follow up
   with `/broadcastconfirm` in the same chat - there's no per-recipient
   undo once it's out, so a wrong draft can't be walked back the way a
   single DM or a card edit can. Sends are throttled to about one message

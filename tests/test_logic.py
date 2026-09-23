@@ -1493,6 +1493,25 @@ def test_broadcast_stages_a_draft_and_counts_only_funded_traders_with_a_chat_id(
     assert "/broadcastconfirm" in sent
 
 
+def test_broadcast_excludes_traders_who_already_received_a_broadcast():
+    store = MagicMock()
+    store.is_true.side_effect = lambda row, col: str(row.get(col, "")).strip().upper() == "TRUE"
+    store.all_rows.return_value = [
+        _funded_row(2, 111),  # new since last broadcast - should get this one
+        {**_funded_row(3, 222), "BroadcastSent": "TRUE"},  # already messaged yesterday
+    ]
+    context = MagicMock()
+    context.bot_data = {"store": store, "mod_group_chat_id": -100}
+    update = _make_broadcast_update(-100, "/broadcast Round 2 traders welcome!")
+
+    asyncio.run(admin.broadcast(update, context))
+
+    pending = context.bot_data["pending_broadcast"]
+    assert [cid for cid, _ in pending["recipients"]] == [111]
+    sent = update.message.reply_text.call_args[0][0]
+    assert "1 funded traders" in sent
+
+
 def test_broadcast_preserves_line_breaks_in_the_message():
     store = MagicMock()
     store.is_true.side_effect = lambda row, col: str(row.get(col, "")).strip().upper() == "TRUE"
@@ -1605,9 +1624,10 @@ def test_run_broadcast_sends_to_everyone_counts_failures_and_reports_a_total(mon
 
     bot = MagicMock()
     bot.send_message = AsyncMock(side_effect=fake_send_message)
+    store = MagicMock()
     context = MagicMock()
     context.bot = bot
-    context.bot_data = {"broadcast_running": True}
+    context.bot_data = {"broadcast_running": True, "store": store}
 
     pending = {
         "text": "Announcement",
@@ -1623,6 +1643,15 @@ def test_run_broadcast_sends_to_everyone_counts_failures_and_reports_a_total(mon
     assert final_call.kwargs["chat_id"] == -100
     assert "4 sent, 1 failed, out of 5" in final_call.kwargs["text"]
 
+    # rows 1,3,4,5 correspond to chat_ids 0,2,3,4 (the successful sends -
+    # chat_id=1/row 2 failed and must NOT be marked, so it's picked up again
+    # by a later broadcast run instead of being silently skipped forever)
+    marked_rows = {}
+    for c in store.update_many_cells.call_args_list:
+        marked_rows.update(c.args[0])
+    assert set(marked_rows) == {1, 3, 4, 5}
+    assert all(v == {"BroadcastSent": "TRUE"} for v in marked_rows.values())
+
     progress_texts = [
         c.kwargs["text"]
         for c in calls
@@ -1630,3 +1659,57 @@ def test_run_broadcast_sends_to_everyone_counts_failures_and_reports_a_total(mon
     ]
     assert any("2/5 processed" in t for t in progress_texts)
     assert any("4/5 processed" in t for t in progress_texts)
+
+
+def test_run_broadcast_flushes_sent_marks_in_batches_not_one_write_per_row(monkeypatch):
+    monkeypatch.setattr(admin, "BROADCAST_SEND_DELAY_SECONDS", 0)
+    monkeypatch.setattr(admin, "BROADCAST_MARK_SENT_BATCH_SIZE", 3)
+
+    bot = MagicMock()
+    bot.send_message = AsyncMock(return_value=None)  # every send succeeds
+    store = MagicMock()
+    context = MagicMock()
+    context.bot = bot
+    context.bot_data = {"store": store}
+
+    pending = {
+        "text": "Announcement",
+        "recipients": [(i, {"_row": i + 1}) for i in range(7)],
+    }
+
+    asyncio.run(admin._run_broadcast(context, pending, mod_group_id=-100))
+
+    # 7 successes at a batch size of 3 -> flush at 3, flush at 6, final flush
+    # of the last 1 - three calls total, never one call per recipient.
+    assert store.update_many_cells.call_count == 3
+    sizes = sorted(len(c.args[0]) for c in store.update_many_cells.call_args_list)
+    assert sizes == [1, 3, 3]
+
+    all_marked = {}
+    for c in store.update_many_cells.call_args_list:
+        all_marked.update(c.args[0])
+    assert set(all_marked) == set(range(1, 8))
+
+
+def test_run_broadcast_continues_even_if_marking_sent_fails(monkeypatch):
+    """A Sheets write failure while marking BroadcastSent shouldn't take down
+    the rest of the send loop or the final summary - worst case those rows
+    get re-messaged by a later run, which is recoverable; losing the whole
+    broadcast mid-run over a sheet write error would not be."""
+    monkeypatch.setattr(admin, "BROADCAST_SEND_DELAY_SECONDS", 0)
+
+    bot = MagicMock()
+    bot.send_message = AsyncMock(return_value=None)
+    store = MagicMock()
+    store.update_many_cells.side_effect = RuntimeError("sheets API down")
+    context = MagicMock()
+    context.bot = bot
+    context.bot_data = {"store": store}
+
+    pending = {"text": "Announcement", "recipients": [(1, {"_row": 2}), (2, {"_row": 3})]}
+
+    asyncio.run(admin._run_broadcast(context, pending, mod_group_id=-100))
+
+    assert context.bot_data["broadcast_running"] is False
+    final_call = bot.send_message.call_args_list[-1]
+    assert "2 sent, 0 failed, out of 2" in final_call.kwargs["text"]

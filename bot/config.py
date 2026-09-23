@@ -111,11 +111,11 @@ CONFIG_DEFAULTS = {
 # Column layout in the worksheet. Row 1 must be a header row with exactly
 # these names (any order - the bot looks columns up by header, not position).
 #
-# LeaderboardRegistered is new - if you're upgrading an existing sheet, add
-# this column to the header row BEFORE deploying this version, or the bot
-# will refuse to start (same RuntimeError FundedAt caused when that one was
-# added). LeaderboardInviteSent, ClaimRequestedAt, and ClaimReminderSent
-# were the previous round of additions.
+# BroadcastSent is new - if you're upgrading an existing sheet, add this
+# column to the header row BEFORE deploying this version, or the bot will
+# refuse to start (same RuntimeError FundedAt caused when that one was
+# added). LeaderboardRegistered, LeaderboardInviteSent, ClaimRequestedAt,
+# and ClaimReminderSent were previous rounds of additions.
 COLUMNS = [
     "Timestamp",
     "Email Address",
@@ -133,5 +133,6 @@ COLUMNS = [
     "ClaimRequestedAt",  # ISO UTC timestamp, stamped when a claim is confirmed - used for the 24h stale-claim reminder
     "ClaimReminderSent",  # TRUE once the mod group has been nudged about a stale REQUESTED claim
     "ClaimInstructionsSent",
+    "BroadcastSent",  # TRUE once a /broadcast has been delivered to this row - keeps a later /broadcast from re-messaging them
     "Notes",
 ]

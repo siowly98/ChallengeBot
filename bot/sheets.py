@@ -182,6 +182,29 @@ class SheetStore:
         self.sheet.batch_update(data, value_input_option="RAW")
         self._invalidate_rows_cache()
 
+    def update_many_cells(self, row_updates: dict[int, dict]) -> None:
+        """Like update_cells, but across MULTIPLE rows in a single API call -
+        e.g. marking BroadcastSent=TRUE for a batch of recipients after a
+        broadcast run. Google's default Sheets API quota is 60 write
+        requests/minute/user; a loop calling update_cell once per row would
+        burn through that in under a minute against a few hundred rows and
+        start getting 429s from Google itself (separate from anything
+        Telegram-side). Batching many rows' writes into one call keeps a
+        broadcast's sheet writes a small fraction of that quota regardless
+        of how many recipients it has."""
+        if not row_updates:
+            return
+        data = [
+            {
+                "range": gspread.utils.rowcol_to_a1(row_number, self._col_index(col)),
+                "values": [[value]],
+            }
+            for row_number, updates in row_updates.items()
+            for col, value in updates.items()
+        ]
+        self.sheet.batch_update(data, value_input_option="RAW")
+        self._invalidate_rows_cache()
+
     def get_config(self) -> dict:
         """Reads the Config tab (Key | Value columns) into a dict, filling
         in anything missing - or the whole tab, if it doesn't exist yet -
